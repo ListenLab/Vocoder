@@ -2571,8 +2571,8 @@ procedure flag_component_overflow
 			comment: "You can select no more than one sound to process"
 			comment: "(because the object names will be the same for each processed sound)"
 			endPause: "Okay - go back to startup menu",1
+	        exitScript()
 		endif
-        exitScript()
 	endif
 endproc
 
