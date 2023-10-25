@@ -46,7 +46,7 @@ then, in the script window, click Run \> Run (or ctrl-R on a PC) to start the sc
 
 # The startup window
 
-![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){width="453px"}
+![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){width=453px}
 
 ### Some parameters that deserve explanation:
 
@@ -64,7 +64,7 @@ USUALLY you will have these numbers be the same. If you want a 12-channel vocode
 
 If you want a peak-picking vocoder, then the number of stimulated channels will be lower than the number of channels. For example, if you want 22 analysis channels, but want to activate only 8 channels at any moment, you will have 8 and then 22. If you do this, then you'll get a follow-up window that looks like this:
 
-![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){width="429px"}
+![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){width=429px}
 
 This setting allows to determine how often the channels will be compared for the purpose of peak-picking. A value of "30" means that the channels will be compared in successive 30-millisecond time windows. This is probably about as short as you want to make it, since spoken language rarely contrasts things that are less than 30 ms apart in a meaningful way (although note that important structured and idiosyncratic variation does occur). A value of "300" means that everything within a 150ms window will be used to pick channels, and this will have a severely damaging effect on your ability to understand the speech, since everything within that long time window will be blurred.
 
