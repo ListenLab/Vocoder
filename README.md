@@ -6,6 +6,8 @@ format: html
 
 # Praat Vocoder
 
+![](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/vocoder_outputs_header2.png)
+
 This script allows you to vocode speech using the free open-source software Praat. Vocoding typically involves some sort of spectral and/or temporal degradation of the speech signal, and is commonly used in experiments relating to cochlear implants. Although vocoded speech is not a perfect simulation of the sound of a cochlear implant, it can help us simulate some aspects of CI processing to see how they affect auditory perception.
 
 ## Basic features
