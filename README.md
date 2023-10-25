@@ -2,8 +2,6 @@
 title: "Praat Vocoder intro"
 author: "Matthew Winn"
 format: html
-editor: visual
-bibliography: references.bib
 ---
 
 # Praat Vocoder
@@ -22,7 +20,7 @@ With this script you can:
 
 -   Control spread of excitation for each carrier channel
 
--   Control interaction of analysis channels (very sueful for sinewave carriers)
+-   Control interaction of analysis channels (very useful for sinewave carriers)
 
 -   Change temporal envelope fidelity (low-pass filtering, quantization, compression)
 
@@ -48,7 +46,7 @@ then, in the script window, click Run \> Run (or ctrl-R on a PC) to start the sc
 
 # The startup window
 
-![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){fig-alt="Praat vocoder startup window" width="550"}
+![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){fig-alt="Praat vocoder startup window" width="393"}
 
 ### Some parameters that deserve explanation:
 
@@ -66,7 +64,7 @@ USUALLY you will have these numbers be the same. If you want a 12-channel vocode
 
 If you want a peak-picking vocoder, then the number of stimulated channels will be lower than the number of channels. For example, if you want 22 analysis channels, but want to activate only 8 channels at any moment, you will have 8 and then 22. If you do this, then you'll get a follow-up window that looks like this:
 
-![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){fig-alt="peak-picking time bin window" width="466"}
+![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){fig-alt="peak-picking time bin window" width="379"}
 
 This setting allows to determine how often the channels will be compared for the purpose of peak-picking. A value of "30" means that the channels will be compared in successive 30-millisecond time windows. This is probably about as short as you want to make it, since spoken language rarely contrasts things that are less than 30 ms apart in a meaningful way (although note that important structured and idiosyncratic variation does occur). A value of "300" means that everything within a 150ms window will be used to pick channels, and this will have a severely damaging effect on your ability to understand the speech, since everything within that long time window will be blurred.
 
@@ -112,13 +110,13 @@ Note: this is not a perfect simulation of shallow insertion depth for a cochlear
 
 The highest rate of envelope fluctuations that are preserved in the carrier channels. Setting this at a low value like 50 will remove any cues for periodicity (pitch). Setting this at a value like 300 Hz can ensure that is above the expected F0 of your speech signal, so long as their F0 is below 300 Hz.
 
-Note 1: Envleope fluctuations result in spectral sidebands. Suppose you have a sinewave carrier channel that is centered on 1000 Hz, and you impose an envelope from a talker whose F0 is 100 Hz. The spectrum of that carrier channel will have components at 900, 1000, and 1100 Hz. Keep this in mind as you think about the relative spacing between your channels.
+Note 1: Envelope fluctuations result in spectral sidebands. Suppose you have a sinewave carrier channel that is centered on 1000 Hz, and you impose an envelope from a talker whose F0 is 100 Hz. The spectrum of that carrier channel will have components at 900, 1000, and 1100 Hz. Keep this in mind as you think about the relative spacing between your channels.
 
 Note 2: For noise carriers, the envelope will contain random fluctuations that are unrelated to your input speech signal. This means that the output will not reflect the original speech envelope very faithfully, and in fact you might not be able to perceive the periodicity at all.
 
 Note 3: For rectangular-shaped carriers, the rate of envelope modulations (in Hz) cannot exceed the linear spectral bandwidth of the channel (in Hz). So if you have a channel that spans from 500 to 615 Hz, it cannot modulate at 200 Hz. You are more likely to see those periodicity-related modulations 1) in the higher channels, which tend to have wider analysis bands, or 2) in carriers of vocoders with a small number of channels, which also tend to have wide frequency analysis bands.
 
-Note 4: in general, it's difficult to hear envelope modulations faster than 30 Hz or so. So this parameter becomes less relevant at higher values.
+Note 4: In general, it's difficult to hear envelope modulations faster than 30 Hz or so. So this parameter becomes less relevant at higher values.
 
 #### Envelope compression or quantization
 
@@ -126,23 +124,23 @@ Check this box to enable a follow-up window where you can set special envelope p
 
 ![extra envelope parameters menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_extra_menu.png){fig-alt="extra envelope parameters menu" width="502"}
 
-This window allows you to impose some extra parameters over the envelope.
+This window allows you to impose some extra parameters over the envelope, as described below.
 
 ##### Envelope Compression
 
 Compression refers to changing the modulation depth of the amplitude envelope. This parameter can vary between 0 and 1. Keeping this setting at 1 means that the envelope modulation depth is unchanged. Setting this parameter to 0.5 means that the depth (in dB) of each modulation is cu tin half. So if there is a 40 dB modulation, it is now 20 dB. Here is an illustration:
 
-![Comparison of envelope compression settings](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_comparison.png){fig-alt="Comparison of envelope compression settings"}
+![Comparison of envelope compression settings](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_comparison.png){fig-alt="Comparison of envelope compression settings" width="476"}
 
 On the full sound waveform, you can see some more examples here:
 
-![Comparison of envelope compression in the full soundwave](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_waveform.png){fig-alt="Comparison of envelope compression in the full soundwave" width="531"}
+![Comparison of envelope compression in the full soundwave](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_waveform.png){fig-alt="Comparison of envelope compression in the full soundwave" width="408"}
 
 ##### Envelope Quantization
 
 Quantization allows you to determine the number of unique values that the sound can take, in the intensity domain. This can be used for example to simulate a small number of discriminable intensities, which is known to be a feature of electric hearing. However, when you implement this in the vocoder, any number of steps beyond 3 has virtually no effect on perception.
 
-![Envelope quantization](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/px_envelope_quantization.png){fig-alt="Envelope quantization"}
+![Envelope quantization](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/px_envelope_quantization.png){fig-alt="Envelope quantization" width="496"}
 
 #### Output name suffix
 
@@ -182,7 +180,7 @@ Process entire folder
 
 If you check this box, you will see a follow-up window allowing you to identify an entire folder of sounds. The script will process all of the .wav files in the folder with the same settings that you determine in the main startup window. You will enter the name of a new sub-folder where all of the outputs will be saved.
 
-![window to process entire folder](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/process_entire_folder_window.png){fig-alt="window to process entire folder" width="486"}
+![window to process entire folder](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/process_entire_folder_window.png){fig-alt="window to process entire folder" width="406"}
 
 If you're not sure exactly how to type in your original folder path, you can choose the option to select it via pop-up window.
 
@@ -192,19 +190,19 @@ There's an extra checkbox here to remove the naming suffix for the outputs. This
 
 By checking this box, you are able to keep some components in the praat object list that are usually cleared away during the vocoding process.
 
-![preserve components menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/preserve_components_menu.png){fig-alt="preserve components menu" width="450"}
+![preserve components menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/preserve_components_menu.png){fig-alt="preserve components menu" width="350"}
 
-Clicking any of these checkboxes means that the selected component will be saved for ALL channels of the vocoder. The exception is the last box "intercept_to_save..." which is a single object to be desribed later.
+Clicking any of these checkboxes means that the selected component will be saved for ALL channels of the vocoder. The exception is the last box "intercept_to_save..." which is a single object to be described later.
 
 If you elect to preserve the [analysis]{.underline} channels for a 12-channel vocoder, then you will have access to the 12 filtered portions of the *original* sound that was analyzed.
 
-If you elect to preserve the [carrier]{.underline} channels for a 12-channel vocoder, then you will have access to the 12 output channels (e.g. 12 sinewaves in a windewave vocoder, or 12 bands of noise in a noise vocoder). This can be useful for inspecting the spectral shape of a channel.
+If you elect to preserve the [carrier]{.underline} channels for a 12-channel vocoder, then you will have access to the 12 output channels (e.g. 12 sinewaves in a sinewave vocoder, or 12 bands of noise in a noise vocoder). This can be useful for inspecting the spectral shape of a channel.
 
 If you elect to preserve the original envelopes for a 12-channel vocoder, then you will have access to the envelopes for the 12 bands of the *original* signal before the envelope was filtered with your specific vocoder settings.
 
 If you elect to preserve the compressed envelopes, then you will have the original envelopes where the modulation depth is altered by the settings you chose in the compression/quantization form. This checkbox will not give you anything useful unless you actually engaged that extra form in the startup menu.
 
-If you elect to preserve the LPF envelopes, then you will have the low-pass filtered envelopes that were used to modulate your vocoder carriers. These filtered envelopes reflect the processing done on the original sound and DO NOT reflect the true output envelope of your carrier because the true output envelope also includes whatever modulations were already part of the carrier. In the case of a sinewave carrier, the output fo the LPF envelope is an accurate reflection of the carrier fo your vocoder channel. But if you have a noise carrier, then the actual carrier also contains a bunch of random noise fluctuations that were never part fo the original sound envelope.
+If you elect to preserve the LPF envelopes, then you will have the low-pass filtered envelopes that were used to modulate your vocoder carriers. These filtered envelopes reflect the processing done on the original sound and DO NOT reflect the true output envelope of your carrier because the true output envelope also includes whatever modulations were already part of the carrier. In the case of a sinewave carrier, the output fo the LPF envelope is an accurate reflection of the carrier of your vocoder channel. But if you have a noise carrier, then the actual carrier also contains a bunch of random noise fluctuations that were never part of the original sound envelope.
 
 To determine the real prevailing envelope of your non-sinewave carrier channels, you will want to preserve the carrier channels and conduct a separate analysis of the envelopes on your own.
 
@@ -213,4 +211,3 @@ If you preserve any of these components described above, you will be given an op
 By electing to "intercept to save channel matrix", you are able to view the timebin-by-timebin analysis of channel intensities that are used for peak-picking. For example, you can see for any time point the intensities of all 22 analysis channels and therefore determine which 8 channels were picked for stimulation. This option will not produce anything useful unless you actually engaged a peak-picking vocoder.
 
 NOTE: If you want to preserve any components, you can only do it for ONE sound at a time. The reason for this is that the object names are generic (i.e. carrier_channel_10) and therefore will not distinguish between different original sounds. Also, depending on your number of analyzed sounds and your number of channels, you could end up with a huge number of objects remaining in the list, and that would be difficult to work through.
-
