@@ -986,7 +986,7 @@ procedure modify_ENV .name$ env_LPF .method$ .keep_periodicity .scramble_mix .su
     cleanup_comparison = 1
     .clean_mix = 1 - .scramble_mix
 
-    # Note: input .draw = 1 will draw the enveloped to the praat picture window
+    # Note: input .draw = 1 will draw the envelopes to the praat picture window
 
     selectObject: "Sound '.name$'"
 
@@ -2508,9 +2508,9 @@ procedure user_select_components_to_preserve
 	if preserve_components_for_inspection == 1
 		beginPause: "Preserve some components for later inspection"
 		comment: "You can save some elements of the vocoding process"
-		comment: "that were created alogn the way."
+		comment: "that were created along the way."
 		comment: ""
-		comment: "(for example, if you want to inspect the enveloped, the filtering, the carriers, etc)"
+		comment: "(for example, if you want to inspect the envelopes, the filtering, the carriers, etc)"
 		comment: ""
 		comment: "NOTE 1: You only want to do this with ONE sound at a time"
 		comment: ""
@@ -3051,7 +3051,7 @@ procedure set_startup_parameters
 	
 	# If user is running a whole folder,
 	# and chose to remove any added naming suffixes
-	# (e.g. if you're workign from a unified sitmulus list,
+	# (e.g. if you're working from a unified sitmulus list,
 	#   and only changing the folder where the files are drawn from,
 	#   as opposed to encoding the vocoder details in the filename itself)
 		if process_entire_folder == 1
