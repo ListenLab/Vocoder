@@ -3,7 +3,7 @@ title: "Vocoder feature demonstrations"
 author: "Matthew Winn"
 ---
 
-## [***Vocoder Feature Demonstrations***]{.underline}
+## [***Vocoder Feature Demonstrations***]
 
 ## **Envelope low pass filtering**
 
