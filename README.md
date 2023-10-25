@@ -46,7 +46,7 @@ then, in the script window, click Run \> Run (or ctrl-R on a PC) to start the sc
 
 # The startup window
 
-![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){width="453"}
+![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png){width="453px"}
 
 ### Some parameters that deserve explanation:
 
@@ -64,7 +64,7 @@ USUALLY you will have these numbers be the same. If you want a 12-channel vocode
 
 If you want a peak-picking vocoder, then the number of stimulated channels will be lower than the number of channels. For example, if you want 22 analysis channels, but want to activate only 8 channels at any moment, you will have 8 and then 22. If you do this, then you'll get a follow-up window that looks like this:
 
-![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){width="429"}
+![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){width="429px"}
 
 This setting allows to determine how often the channels will be compared for the purpose of peak-picking. A value of "30" means that the channels will be compared in successive 30-millisecond time windows. This is probably about as short as you want to make it, since spoken language rarely contrasts things that are less than 30 ms apart in a meaningful way (although note that important structured and idiosyncratic variation does occur). A value of "300" means that everything within a 150ms window will be used to pick channels, and this will have a severely damaging effect on your ability to understand the speech, since everything within that long time window will be blurred.
 
@@ -122,7 +122,7 @@ Note 4: In general, it's difficult to hear envelope modulations faster than 30 H
 
 Check this box to enable a follow-up window where you can set special envelope parameters
 
-![extra envelope parameters menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_extra_menu.png){width="502"}
+![extra envelope parameters menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_extra_menu.png){width="502px"}
 
 This window allows you to impose some extra parameters over the envelope, as described below.
 
@@ -130,7 +130,7 @@ This window allows you to impose some extra parameters over the envelope, as des
 
 Compression refers to changing the modulation depth of the amplitude envelope. This parameter can vary between 0 and 1. Keeping this setting at 1 means that the envelope modulation depth is unchanged. Setting this parameter to 0.5 means that the depth (in dB) of each modulation is cu tin half. So if there is a 40 dB modulation, it is now 20 dB. Here is an illustration:
 
-![Comparison of envelope compression settings](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_comparison.png){width="476"}
+![Comparison of envelope compression settings](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_comparison.png){width="476px"}
 
 On the full sound waveform, you can see some more examples here:
 
@@ -140,7 +140,7 @@ On the full sound waveform, you can see some more examples here:
 
 Quantization allows you to determine the number of unique values that the sound can take, in the intensity domain. This can be used for example to simulate a small number of discriminable intensities, which is known to be a feature of electric hearing. However, when you implement this in the vocoder, any number of steps beyond 3 has virtually no effect on perception.
 
-![Envelope quantization](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/px_envelope_quantization.png){width="496"}
+![Envelope quantization](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/px_envelope_quantization.png){width="496px"}
 
 #### Output name suffix
 
@@ -180,7 +180,7 @@ Process entire folder
 
 If you check this box, you will see a follow-up window allowing you to identify an entire folder of sounds. The script will process all of the .wav files in the folder with the same settings that you determine in the main startup window. You will enter the name of a new sub-folder where all of the outputs will be saved.
 
-![window to process entire folder](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/process_entire_folder_window.png){width="406"}
+![window to process entire folder](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/process_entire_folder_window.png){width="406px"}
 
 If you're not sure exactly how to type in your original folder path, you can choose the option to select it via pop-up window.
 
@@ -190,7 +190,7 @@ There's an extra checkbox here to remove the naming suffix for the outputs. This
 
 By checking this box, you are able to keep some components in the praat object list that are usually cleared away during the vocoding process.
 
-![preserve components menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/preserve_components_menu.png){width="350"}
+![preserve components menu](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/preserve_components_menu.png){width="350px"}
 
 Clicking any of these checkboxes means that the selected component will be saved for ALL channels of the vocoder. The exception is the last box "intercept_to_save..." which is a single object to be described later.
 
