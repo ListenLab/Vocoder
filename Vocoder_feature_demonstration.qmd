@@ -13,7 +13,7 @@ Begin with a short sound (1-2 seconds long). On the startup window, choose to pr
 
 Examine a single channel (e.g. channel 7) for both the original and LPF env outputs.
 
-The sinewave carrier makes it easy to see the effects of the filtering. Unrelated fluctuations from other carriers (noise, harmonic complex) will be inherited into the output channel, making ti harder to cleanly see the effects of your envelope filtering.
+The sinewave carrier makes it easy to see the effects of the filtering. Unrelated fluctuations from other carriers (noise, harmonic complex) will be inherited into the output channel, making it harder to cleanly see the effects of your envelope filtering.
 
 ![](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/combine_filtered_envelopes_to_stereo.png){width="422"}
 
@@ -39,7 +39,7 @@ Then open up the combined-to-stereo sound to view the differences in envelope. B
 
 ![](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/same_channel_two_carriers_wave.png){width="600"}
 
-## **Envelope / channel width interaction**
+## **Effect of channel bandwidth on carrier modulation depth**
 
 Show how number of channels influences channel width, which influences envelope modulations
 
@@ -47,7 +47,7 @@ Preserve analysis channels and original envelopes
 
 Vocode the same sound using a sinewave carrier, with rectangular analysis filters (analysis filter slope = 0). Allow the envelope cutoff frequency to be high (around 300 Hz). Vocode with different number of channels (e.g. once with 4 channels and once with 12 channels).
 
-For a channel whose center frequency is about 10-15x the talker\'s fundamental frequency, examine that channel in both of the outputs. This will be a different number for both iterations of the vocoder process. For example, channel 2 is a 4-channel vocoder might be compared to channel 6 in a 12-channel vocoder).
+For a channel whose center frequency is about 10-15x the talker's fundamental frequency, examine that channel in both of the outputs. This will be a different number for both iterations of the vocoder process. For example, channel 2 is a 4-channel vocoder might be compared to channel 6 in a 12-channel vocoder).
 
 You will observe how the modulation depth is greater in the channel from the vocoder with fewer channels, because the analysis filter spans a wider bandwidth, which corresponds to envelope modulations.
 
@@ -57,13 +57,13 @@ Create 8-second harmonic complex with F0 of 50 Hz for dense spectral coverage (t
 
 Vocode with 6 channels using a harmonic complex carrier that has a specific controlled filter rolloff. For example 12 dB per octave. Then repeat with the same parameters except change the filter rolloff to 24 dB/octave. Each time, choose to preserve the carrier channels
 
-[*Note 1*]{.underline}*: you can also do this with a filter operating as dB/mm, but it\'s much harder to track that in the output*
+[*Note 1*]{.underline}*: you can also do this with a filter operating as dB/mm, but it's much harder to track that in the output*
 
 [*Note 2*]{.underline}*: You can also do this with a noise carrier, but the results will be somewhat tainted by the inherent spectral irregularities of noise*
 
 In the outputs, choose a specific channel (e.g. channel 3), and compare the spectra of both sounds. You will notice a difference in the steepness of the rolloff from the center of the channel.
 
-You can also look at the spectrum of the \*entire\* vocoded sound. To do this, select the output vocoded sound in the object list, then click Analyze spectrum \> To spectrum... (and you can leave the \"fast\" checkbox enabled).
+You can also look at the spectrum of the \*entire\* vocoded sound. To do this, select the output vocoded sound in the object list, then click Analyze spectrum \> To spectrum... (and you can leave the "fast" checkbox enabled).
 
 View the spectra of both vocoded sounds to observe the same number of channel peaks, which have different steepness.
 
@@ -85,19 +85,19 @@ You can also complete this process with other types of carrier (e.g. noise), but
 
 Vocode a sound with 6 channels using a sinewave carrier. These parameters are not essential, but they will make it easy to view the effect being used. It would be best to use a sound that has modulations, such as a short sentence (2-4 seconds long).
 
-Check the \"envelope compression or quantization\" box.
+Check the "envelope compression or quantization" box.
 
 Check the box to preserve components, and choose to preserve the LPF envelopes.
 
-First vocode the sound while leaving the \"compression_mult\" value at 1. You do not need to save the components.
+First vocode the sound while leaving the "compression_mult" value at 1. You do not need to save the components.
 
-Then, use all the same exact settings, but change the \"compression_mult\" value to be 0.5 or lower.
+Then, use all the same exact settings, but change the "compression_mult" value to be 0.5 or lower.
 
-You can compare the full vocoded sound output in each case, and for more detail, you can compare the same exact channel from both levels of compression. For example, you can ctrl+select both instances of \"env_ch_4_3_compressed_LPF\", and then click Combine \> Combine to stereo. Open up that stereo file to see that the envelopes have different modulation depths (you might want to disable the spectrogram in the sound editor window, to get a clearer image of the envelopes).
+You can compare the full vocoded sound output in each case, and for more detail, you can compare the same exact channel from both levels of compression. For example, you can ctrl+select both instances of "env_ch_4_3_compressed_LPF", and then click Combine \> Combine to stereo. Open up that stereo file to see that the envelopes have different modulation depths (you might want to disable the spectrogram in the sound editor window, to get a clearer image of the envelopes).
 
-![Comparison of envelope compression in the full soundwave](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_waveform.png){alt="Comparison of envelope compression in the full soundwave" width="408"}
+![Comparison of envelope compression in the full soundwave](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_waveform.png){width="408"}
 
-## **Envelope quantization** 
+## **Envelope quantization**
 
 Follow the same steps as described above for envelope compression, but leave the compression value at 1, and change the number of intensity steps to be something low like 2 or 3. Preserve the carrier channels.
 
