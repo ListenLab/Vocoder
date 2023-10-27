@@ -68,7 +68,7 @@ If you want a peak-picking vocoder, then the number of stimulated channels will 
 
 ![peak-picking time bin window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/peak_picking_time_bin_window.png){width="429"}
 
-This setting allows to determine how often the channels will be compared for the purpose of peak-picking. A value of "30" means that the channels will be compared in successive 30-millisecond time windows. This is probably about as short as you want to make it, since spoken language rarely contrasts things that are less than 30 ms apart in a meaningful way (although note that important structured and idiosyncratic variation does occur). A value of "300" means that everything within a 150ms window will be used to pick channels, and this will have a severely damaging effect on your ability to understand the speech, since everything within that long time window will be blurred.
+This setting allows the user to determine how often the channels will be compared for the purpose of peak-picking. A value of "30" means that the channels will be compared in successive 30-millisecond time windows. This is probably about as short as you want to make it, since spoken language rarely contrasts things that are less than 30 ms apart in a meaningful way (although note that important structured and idiosyncratic variation does occur). A value of "300" means that everything within a 150ms window will be used to pick channels, and this will have a severely damaging effect on your ability to understand the speech, since everything within that long time window will be blurred.
 
 #### Analysis Filter Slope
 
@@ -106,11 +106,11 @@ For example: Suppose one of your carrier channels has a center frequency of 2000
 
 This shifts all the frequencies in the carrier by a specified amount of space along the basilar membrane in the cochlea.
 
-Note: this is not a perfect simulation of shallow insertion depth for a cochlear implant, since the electrode placements are not specifically programmed into this vocoder, and the mapping fo stimulation site to perceived frequency operates according to the spiral ganglion rather than the basilar membrane. Still, this is the method that people generally use to simulate the well-known effect of upward spectral shifting in a cochlear implant.
+Note: this is not a perfect simulation of shallow insertion depth for a cochlear implant, since the electrode placements are not specifically programmed into this vocoder, and the mapping of stimulation site to perceived frequency operates according to the spiral ganglion rather than the basilar membrane. Still, this is the method that people generally use to simulate the well-known effect of upward spectral shifting in a cochlear implant.
 
 #### Envelope cutoff filter (Hz)
 
-The highest rate of envelope fluctuations that are preserved in the carrier channels. Setting this at a low value like 50 will remove any cues for periodicity (pitch). Setting this at a value like 300 Hz can ensure that is above the expected F0 of your speech signal, so long as their F0 is below 300 Hz.
+The highest rate of envelope fluctuations that are preserved in the carrier channels. Setting this at a low value like 50 will remove any cues for periodicity (pitch). Setting this at a value like 300 Hz can ensure that it is above the expected F0 of your speech signal, so long as their F0 is below 300 Hz.
 
 Note 1: Envelope fluctuations result in spectral sidebands. Suppose you have a sinewave carrier channel that is centered on 1000 Hz, and you impose an envelope from a talker whose F0 is 100 Hz. The spectrum of that carrier channel will have components at 900, 1000, and 1100 Hz. Keep this in mind as you think about the relative spacing between your channels.
 
@@ -130,7 +130,7 @@ This window allows you to impose some extra parameters over the envelope, as des
 
 ##### Envelope Compression
 
-Compression refers to changing the modulation depth of the amplitude envelope. This parameter can vary between 0 and 1. Keeping this setting at 1 means that the envelope modulation depth is unchanged. Setting this parameter to 0.5 means that the depth (in dB) of each modulation is cu tin half. So if there is a 40 dB modulation, it is now 20 dB. Here is an illustration:
+Compression refers to changing the modulation depth of the amplitude envelope. This parameter can vary between 0 and 1. Keeping this setting at 1 means that the envelope modulation depth is unchanged. Setting this parameter to 0.5 means that the depth (in dB) of each modulation is cut in half. So if there is a 40 dB modulation, it is now 20 dB. Here is an illustration:
 
 ![Comparison of envelope compression settings](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/envelope_compression_comparison.png){width="476"}
 
