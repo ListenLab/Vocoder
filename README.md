@@ -48,7 +48,7 @@ then, in the script window, click Run \> Run (or ctrl-R on a PC) to start the sc
 
 # The startup window
 
-![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png width="453px")
+![Praat vocoder startup window](https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/startup_window.png width=453)
 
 ### Some parameters that deserve explanation:
 
