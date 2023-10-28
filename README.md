@@ -90,9 +90,14 @@ Within this drop-down menu, there are further options specific for each type
 
 <img src="https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/carrier_dropdown.png" align="center" width="370"/>
 
+The carrier choice will have an impact on both the temporal fidelity of the envelope (i.e. amplitude fluctuation coding) and also the frequency spectrum. See below how different carriers reflect the original sound envelope more or less faithfully
+
+<img src="https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/carrier_waves.png" align="center" width="450"/>
+
 For carriers that are naturally broadband in nature, you have the option of shaping the output spectrum to be rectangular (i.e. contiguous), or sloped in a way that reflects spread of excitation.
 
-The carrier choice will have an impact on both the temporal fidelity of the envelope (i.e. amplitude fluctuation coding) and also the frequency spectrum. For example, see below how a 6-channel vocoder with the same frequency analysis settings can result in varying spectra depending on your choice of carrier.
+
+For example, see below how a 6-channel vocoder with the same frequency analysis settings can result in varying spectra depending on your choice of carrier.
 
 <img src="https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/carrier_spectra.png" align="center" width="640"/>
 
