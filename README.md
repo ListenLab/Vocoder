@@ -92,6 +92,10 @@ Within this drop-down menu, there are further options specific for each type
 
 For carriers that are naturally broadband in nature, you have the option of shaping the output spectrum to be rectangular (i.e. contiguous), or sloped in a way that reflects spread of excitation.
 
+The carrier choice will have an impact on both the temporal fidelity of the envelope (i.e. amplitude fluctuation coding) and also the frequency spectrum. For example, see below how a 6-channel vocoder with the same frequency analysis settings can result in varying spectra depending on your choice of carrier.
+
+<img src="https://raw.githubusercontent.com/ListenLab/Vocoder/main/images/carrier_spectra.png" align="center" width="640"/>
+
 #### Harmonic Complex F0
 
 This field only matters if you have selected a harmonic complex as your carrier. The harmonic complex is generated with in-phase sinewaves that share a common fundamental, and you set that fundamental here. A lower fundamental (e.g. 50 Hz or below) results in a harmonic every 50 Hz, which is advantageous for dense spectral coverage (you can shape it very specifically), but disadvantageous in that it results in a perceptibly low pitch and slow rate of "pulsing" in the output. A fundamental between 100 and 200 Hz results in an output that sounds like a monotone robotic voice; this range will typically ensure 'adequate' spectral coverage. Fundamentals 300 Hz and higher will typically result in spectral components that are too dense to control very rigorously. For example, if your components exist at 400, 800, 1200, 1600, etc., then there is no way of carefully controlling the exact spectral shape in terms of peaked rolloff.
