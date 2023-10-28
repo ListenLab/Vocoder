@@ -2558,6 +2558,13 @@ procedure user_select_components_to_preserve
 		preserve_LPF_envelopes           = 0
 		intercept_to_save_channel_matrix = 0
 	endif
+
+	# if components are preserved, disable the speed optimization
+	# (because the downsampling will make it very cumbersome 
+	# to do post-hoc analysis of the components)
+	if preserve_components_for_inspection == 1
+		resample_to_optimize_speed = 0
+	endif
 endproc
 
 
