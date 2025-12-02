@@ -1,0 +1,3128 @@
+#############################################################################
+#############################################################################
+# Vocoder
+# Vocode all selected sounds in the Objects list
+# or all sounds in a specified folder
+#
+# Matthew Winn
+# 
+# Version 59
+# Feburary 2024
+#
+#
+#############################################################################
+#############################################################################
+# THE STARTUP WINDOW
+#############################################################################
+#############################################################################
+
+form Enter vocoder settings 
+	optionmenu analysis_frequency_allocation 1
+		option Cochlea-spaced based on these frequencies
+		option use ``Cochlear`` map
+		option use ``Med-El`` map
+		option use ``Advanced Bionics`` map
+		option use customized map from the script
+		option use custom linear channels
+	comment Note: anything other than option 1 will override the next four settings
+	
+	comment ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	comment overall upper and lower corner frequencies
+		real corner_frequency_low 100
+		real corner_frequency_high 8000
+
+	comment number of analysis & synthesis channels (n-of-m)
+		integer number_stimulated 12
+		integer number_of_channels 12
+
+	comment analysis filter slope (dB/oct) (leave at 0 for contiguous rectangular filters)
+		real analysis_filter_slope 0
+
+	comment synthesis filter parameters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	optionmenu carrier_type 1
+		option sinewave
+		option noise, rectangular
+		option noise, peaked (controlled filter rolloff/mm)
+        option noise, peaked (controlled filter rolloff/oct)
+		option low-noise noise
+		option harmonic_complex, rectangular
+		option harmonic_complex, (controlled filter rolloff/mm)
+        option harmonic_complex, (controlled filter rolloff/oct)
+		#option use original sound
+	
+	real harmonic_complex_F0 200
+
+	real peaked_carrier_rolloff_(dB_per_oct_or_mm) 6
+
+	# basal shift (in mm of cochlear space)
+	real basal_shift_(mm) 0
+
+	comment Envelope modification ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	real envelope_cutoff_filter_(Hz) 300
+	
+	boolean envelope_compression_or_quantization 0
+
+	comment Output ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	
+	# output name suffix (leave blank for auto-suffix)
+	sentence output_name_suffix 
+	
+	# run all sounds in a whole folder? 
+	boolean process_entire_folder 0
+
+	boolean preserve_components_for_inspection 0
+	
+endform
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+#                                                            #
+###            MAIN     WRAPPER    PROCESSES               ###
+#                                                            #
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+clearinfo
+
+
+call set_startup_parameters
+
+#-----------------------------------------------------------------#
+#                                                                 #
+#   if you are vocoding sounds already in the objects window...   #
+#                                                                 #
+#-----------------------------------------------------------------#
+
+if process_entire_folder == 0
+	pause select all sounds to be used for this operation
+	num_selected_sounds = numberOfSelected ("Sound")
+
+	# assign object pointers to each of those sounds
+	for selected_sound_index from 1 to num_selected_sounds
+		sound'selected_sound_index' = selected("Sound",selected_sound_index)
+	endfor
+
+    if num_selected_sounds >= 14
+        print vocoding (no print window updates)
+    endif
+
+	call flag_component_overflow
+    
+    # Loop through the sounds that were selected in the Objects list,
+	for this_sound_index from 1 to num_selected_sounds			
+		select sound'this_sound_index'
+		name$ = selected$("Sound")
+        if num_selected_sounds < 14
+		    print vocoding 'name$'... ('this_sound_index' of 'num_selected_sounds')
+        endif
+
+		#stopwatch
+		stopwatch
+		call vocode 'name$'
+		time_elapsed = stopwatch
+        if num_selected_sounds < 14
+		    print ...... took 'time_elapsed:3' seconds'newline$'
+        endif
+	endfor
+elsif process_entire_folder == 1
+	#-----------------------------------------#
+	#                                         #
+	#   If you're running a whole folder...   #
+	#                                         #
+	#-----------------------------------------#
+	Create Strings as file list: "fileList", "'orig_directory$'\*.wav"
+	num_files = Get number of strings
+
+	# Only proceed if there are any files to work with
+		print Processing 'num_files' files in the folder 'orig_directory$''newline$'
+
+	if num_files < 1
+		exit no files in this directory!
+	endif
+
+	num_selected_sounds = num_files
+	call flag_component_overflow
+
+	# Make the new folder
+		system mkdir 'orig_directory$'\'new_directory_name$'
+
+	# Loop through the file list
+	for file_index from 1 to num_files
+		select Strings fileList
+
+		filename$ = Get string: 'file_index'
+		Read from file: "'orig_directory$'\'filename$'"
+		name$ = selected$("Sound")
+
+		call vocode 'name$'
+
+		# save the sound
+			select Sound 'name$''vocoded_suffix$'
+			Save as WAV file... 'orig_directory$'\'new_directory_name$'\'name$''vocoded_suffix$'.wav
+
+		# remove the new sound
+			select Sound 'name$''vocoded_suffix$'
+			Remove
+
+		# remove the original sound
+			select Sound 'name$'
+			Remove
+	endfor
+endif
+
+# Print the parameters used
+    print 'newline$'
+    call print_corner_frequencies
+    call print_vocoder_settings
+
+    if process_entire_folder == 1
+        # Save info box to the same folder
+        call saveInfoWindow 'orig_directory$'\'new_directory_name$' 'new_directory_name$'_vocoder_info
+        select Strings fileList
+        Remove
+    endif
+
+call save_component_parts
+
+# DONE
+print 'newline$'DONE!!!
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+#                                                            #
+#                      SUB-PROCEDURES                        #
+#                                                            #
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
+
+procedure vocode name$
+    # The main procedure, which contains a bunch of subroutines
+
+    # Get Sound info
+	select Sound 'name$'
+	start = Get start time
+	end = Get end time
+	samplerate = Get sampling frequency
+	original_samplerate = Get sampling frequency
+
+    call optional_resample
+
+	#===============================================================#
+	#  DIVIDE INTO ANALYSIS CHANNELS
+		call divide_into_analysis_channels 'name$'
+
+	#===============================================================#
+	# MAKE CHANNEL ENVELOPES
+		call create_envelopes 'name$' number_of_channels rolloff_per_x envelope
+	#===============================================================#
+	# PEAK-PICKING	     
+	    if number_stimulated != number_of_channels
+		     call peakpick_envelopes number_of_channels number_stimulated window_refresh_rate
+		endif
+	#===============================================================#
+	# MAKE THE CARRIERS
+		call make_carriers
+	#===============================================================#
+	# COMBINE THE CHANNELS
+		select Sound carrier_channel_1
+		Copy... temp_vocoded
+		if number_of_channels > 1
+			for chan_index from 2 to number_of_channels
+				Formula... self[col] + Sound_carrier_channel_'chan_index'[col]
+			endfor
+		endif
+
+	#===============================================================#
+	# CLEANUP
+	call cleanup_temp_objects
+
+	#===============================================================#
+	# LOOSE-ENDS: INTENSITY, EMPHASIS, RAMPING, CLIPPING, ETC.
+	call finalize_vocode_process
+endproc
+
+
+procedure divide_into_analysis_channels .sound$
+    #===============================================================#
+    # DIVIDE SOUND INTO ANALYSIS BANDS    	
+	# First, get some basic info
+		select Sound '.sound$'
+		.duration = Get total duration
+		.samplerate = Get sampling frequency
+		
+			if pre_emphasize == 1
+				# first preemphasize
+				Filter (pre-emphasis): preemphasis_starting_frequency
+				Rename... '.sound$'
+			else
+				Copy... '.sound$'
+			endif
+    
+		if analysis_channel_shape$ == "rectangular"
+			call divide_into_analysis_channels_rectangular '.sound$'
+			#yields: '.sound$'_analysis_channel_'.channel_loop_index'  for all channels
+
+		elsif analysis_channel_shape$ == "sloped"
+			call divide_into_analysis_channels_sloped '.sound$'
+			#yields: '.sound$'_analysis_channel_'.channel_loop_index'  for all channels
+
+		endif
+
+    # Remove the temporarily preemphasized sound
+    # because it shares a common name with the original sound object
+	# (even if you didn't preemphasize, it created this object)
+    	select Sound '.sound$'
+    	Remove
+endproc
+
+
+procedure create_envelopes .sound$ .numAnalysisChannels .rolloff_per_x .envelope_cutoff_freq
+    # This procedure creates sound objects
+    # that represent the envelopes of each channel. 
+    # yields: channel_'.channel_loop_index'_ENV_step_3_LPF
+    # (because it is the output of a three-step process)
+    #
+    # First, get some basic info
+       select Sound '.sound$'
+       .duration = Get total duration
+       .samplerate = Get sampling frequency
+       
+    #===============================================================#
+    # MAKE THE ENVELOPES
+    for .channel_loop_index from 1 to .numAnalysisChannels
+	   # First get the original intensity   
+		select Sound '.sound$'_analysis_channel_'.channel_loop_index'
+		channel_'.channel_loop_index'_intensity = Get intensity (dB)
+		#---------------------------------------------------#
+		# Ensure that the intensity is above 0
+			if channel_'.channel_loop_index'_intensity < 0 
+			   channel_'.channel_loop_index'_intensity = 0.01
+			endif
+	   
+        #===============================================================#
+        # Step 1: EXTRACT THE ENVELOPE
+	   		
+        if use_Hilbert == 1
+            # Get HILBERT transform envelope
+            call do_Hilbert_transform '.sound$'_analysis_channel_'.channel_loop_index'
+                #-------------------------------------#
+                # envelope is "'.sound$'_analysis_channel_'.channel_loop_index'_ENV"
+                # TFS is "'.sound$'_analysis_channel_'.channel_loop_index'_TFS"
+                #-------------------------------------#
+                # remove TFS (we don't need that)
+            select Sound '.sound$'_analysis_channel_'.channel_loop_index'_TFS
+            Remove
+        else
+            # FAST ENVELOPE using Intensity Tier, etc
+            call fast_envelope '.sound$'_analysis_channel_'.channel_loop_index'
+            # envelope is "'.sound$'_analysis_channel_'.channel_loop_index'_ENV"
+        endif
+
+        if preserve_original_envelopes == 1
+            select Sound '.sound$'_analysis_channel_'.channel_loop_index'_ENV
+            Copy... env_ch_'.channel_loop_index'_orig
+        endif
+
+        #===============================================================#
+        # Step 2: COMPRESS the envelope
+        # if you selected anything other than "1", "0", or "-1" for the compression_mult
+			
+	   	# work with the envelope_LPF Sound object
+	   	if compression_mult < 1
+			call compress_envelope '.sound$'_analysis_channel_'.channel_loop_index'_ENV compression_mult .envelope_cutoff_freq
+			# yields '.sound$'_analysis_channel_'.channel_loop_index'_ENV_compressed
+
+			select Sound '.sound$'_analysis_channel_'.channel_loop_index'_ENV_compressed
+			Rename... channel_'.channel_loop_index'_ENV_step_2
+
+		else
+			# Just rename it to match the expected naming scheme
+			select Sound '.sound$'_analysis_channel_'.channel_loop_index'_ENV
+			Rename... channel_'.channel_loop_index'_ENV_step_2
+		endif
+
+        if preserve_compressed_envelopes == 1
+            select Sound channel_'.channel_loop_index'_ENV_step_2
+            Copy... env_ch_'.channel_loop_index'_2_compressed
+        endif
+
+        #===============================================================#
+        # Step 3: LOW-PASS FILTER THE ENVELOPE
+		# if you've got a number above zero in the LPF argument,
+		# use it as the upper limit of a low-pass filter
+		if .envelope_cutoff_freq > 0 
+			select Sound channel_'.channel_loop_index'_ENV_step_2
+			# rename for easy object removal later
+			Rename... full_envelope
+			
+		     # just extract the low-pass envelope (i.e. below 50 Hz)
+			Filter (pass Hann band): 0, .envelope_cutoff_freq, 2
+
+			# this is the object name to be inherited by the next stage on the process
+			Rename... channel_'.channel_loop_index'_ENV_step_3_LPF
+			
+			# remove near-silence
+				if remove_near_silence
+					Formula: "if self[col] < silence_threshold then 0 else self endif"
+				endif
+			
+		    if preserve_LPF_envelopes == 1
+				select Sound channel_'.channel_loop_index'_ENV_step_3_LPF
+				# make an extra copy that will not be removed from the object list
+				Copy... env_ch_'.channel_loop_index'_3_compressed_LPF
+		    endif
+			
+			select Sound full_envelope
+			Remove
+			
+		#===============================================================#
+		# Secret code to SCRAMBLE envelope phase
+		elsif .envelope_cutoff_freq == 0
+		    # Secret code to SCRAMBLE envelope phase: cutoff frequency is 0
+			select Sound channel_'.channel_loop_index'_ENV_step_2
+			env_LPF = 50
+			# keep_periodicity = 1
+			draw_env = 0
+			call modify_ENV channel_'.channel_loop_index'_ENV_step_2 env_LPF scramble keep_periodicity scramble_mix _scrambled draw_env
+			select Sound channel_'.channel_loop_index'_ENV_step_2_scrambled
+
+			# this is the object name to be inherited by the next stage on the process
+			Rename... channel_'.channel_loop_index'_ENV_step_3_LPF
+
+            removeObject: "Sound channel_'.channel_loop_index'_ENV_step_2"
+
+		#===============================================================#
+		# Secret code to INVERT the envelope: cutoff frequency is -1
+		elsif .envelope_cutoff_freq == -1
+	   		
+			select Sound channel_'.channel_loop_index'_ENV_step_2
+			env_LPF = 50
+			keep_periodicity = 1
+			draw_env = 0
+			call modify_ENV channel_'.channel_loop_index'_ENV_step_2 env_LPF scramble keep_periodicity scramble_mix _inverted draw_env
+			select Sound channel_'.channel_loop_index'_ENV_step_2_inverted
+			
+			# this is the object name to be inherited by the next stage on the process
+			Rename... channel_'.channel_loop_index'_ENV_step_3_LPF
+		endif
+	endfor
+endproc
+
+procedure fast_envelope .name$
+    # Obtain the envelope of a sound
+    # This was written because doing an actual Hilbert transform 
+    # can be very slow, and this procedure gives you the same results
+    # using fast native-Praat functions
+    #
+    # First, make the amplitude envelope
+		select Sound '.name$'
+		.samplerate = Get sampling frequency
+		.duration = Get total duration
+	
+        To Intensity: 800, 0, "yes"
+        selectObject: "Intensity '.name$'"
+        Down to IntensityTier
+        To AmplitudeTier
+
+    # Turn it into a sound object
+        Down to TableOfReal
+        To Matrix
+        Transpose
+        To Sound (slice): 2
+        Rename... temp
+
+   # Fix timing (in case of extension of shortening) and samplerate
+		Scale times to: 0, .duration
+		Resample: .samplerate, 5
+		Rename: "'.name$'_ENV"
+
+   # Cleanup
+		select Intensity '.name$'
+		plus IntensityTier '.name$'
+		plus AmplitudeTier '.name$'
+		plus TableOfReal '.name$'
+		plus Matrix '.name$'
+		plus Matrix '.name$'_transposed
+		plus Sound temp
+		Remove
+endproc
+
+
+procedure peakpick_envelopes num_channels num_selected window_refresh_rate
+	#=============================================================================#
+	# CONCEPT:
+	# If you selected a number of synthesis channels that is smaller than         #
+	# the number of analysis channels, it does a peak-picking algorithm           #
+	# "ACE"-style processing: walk along each time bin, vocode, keep top N peaks. #
+	#=============================================================================#
+	# IMPLEMENTATION:
+	# Downsamples a sound envelope so that there is one value for each time bin.
+	# Organizes all the intensity values in each time bin into a table.
+	# At every time point, the channel intensities are sorted
+	#    so you can extract each of the top n. 
+	#
+	# yields
+	# "channel_'n'_ENV_peakpicked"
+
+	num_channels_dropped = num_channels - num_selected
+	
+	selectObject: "Sound channel_1_ENV_step_3_LPF"
+	orig_samplerate = Get sampling frequency
+
+	# grab all the channel envelopes... 
+	   selectObject: "Sound channel_1_ENV_step_3_LPF"
+	   for chan_index from 2 to num_channels
+	       plusObject: "Sound channel_'chan_index'_ENV_step_3_LPF"
+	   endfor
+
+	# Filter to anti-alias, then downsample
+		Filter (pass Hann band): 0, window_refresh_rate, 20
+		resamplerate = window_refresh_rate*2
+		# round it to a whole number
+		resamplerate = 'resamplerate:0'
+		Resample: resamplerate, 20
+
+	# correct to ensure envelope >= 0
+	    for chan_index from 1 to num_channels
+			#  eliminate values below 0
+			Formula: "if self[col] < 0 then 0 else self[col] endif"
+	    endfor
+
+	select Sound channel_1_ENV_step_3_LPF_band_'resamplerate'
+	num_samples = Get number of samples
+
+	Create simple Matrix: "xy", num_channels, num_samples+1, "0"
+	num_rows = Get number of rows
+	num_cols = Get number of columns
+
+	# Channel loop
+	for row_index from 1 to num_rows
+	   # set channel number in first column
+	   Set value: row_index, 1, row_index
+
+	   # time-sample loop
+		 for col_index from 2 to num_cols
+	      # set channel number
+	       Set value: row_index, col_index, Sound_channel_'row_index'_ENV_step_3_LPF_band_'resamplerate'[col_index-1]
+	   endfor
+	endfor
+
+	select Matrix xy
+	To TableOfReal
+	To Table: "junk"
+	select Matrix xy
+	plus TableOfReal xy
+	Remove
+
+	select Table xy
+	Remove column: "junk"
+	Set column label (index): 1, "channel"
+
+	for col_index from 2 to num_cols
+	   col_sample_index = col_index-1
+	   Set column label (index): col_index, "s'col_sample_index'"
+	endfor
+
+	# Loop through each envelope sample
+		for col_index from 2 to num_cols
+			sample_index = col_index - 1
+			select Table xy
+			# sort by intensity in this time window sample
+			Sort rows: "s'sample_index'"
+
+			# loop through dropped channels
+			for n_dropped from 1 to num_channels_dropped
+				# zero-out the dropped channel
+				Set numeric value: n_dropped, "s'sample_index'", 0
+			endfor
+		endfor
+
+	# Re-sort by channel
+		select Table xy
+		Sort rows: "channel"
+
+	# Remove channel column
+		Remove column: "channel"
+		Down to Matrix
+
+	# Create new sounds out of each peak-picked envelope
+		for chan_index from 1 to num_channels
+			select Matrix xy
+			To Sound (slice): chan_index
+			Override sampling frequency: resamplerate
+			Shift times to: "start time", 0
+
+			Formula... if self[col] > 0 then 1 else 0 endif
+			Rename... junk
+			Resample: orig_samplerate, 2
+			Rename: "channel_'chan_index'_ENV_step_3_LPF_peakpicked_downsampled_binary"
+			select Sound junk
+			Remove
+		endfor
+
+	# Multiply the original envlope with the peak-picked envelope
+		for chan_index from 1 to num_channels
+			# multiple binary peak-picked envelope
+			# with true envelope
+			select Sound channel_'chan_index'_ENV_step_3_LPF
+			Copy... channel_'chan_index'_ENV_peakpicked
+			Formula... self[col] * Sound_channel_'chan_index'_ENV_step_3_LPF_peakpicked_downsampled_binary[col]
+		endfor
+	
+	# intercept to save peak picking matrix
+		if intercept_to_save_channel_matrix == 1
+			pause save peak-picked matrix xy
+		endif
+
+	# Cleanup of all things apart from peakpicked channel envelopes
+		select Matrix xy
+		plus Table xy
+		for n from 1 to num_channels
+			plus Sound channel_'n'_ENV_step_3_LPF_band
+			plus Sound channel_'n'_ENV_step_3_LPF_band_'resamplerate'
+			plus Sound channel_'n'_ENV_step_3_LPF_peakpicked_downsampled_binary
+		endfor
+		Remove
+
+	# Must re-name the envelopes now to match the expected naming structure
+		call rename_peakpicked_envelopes
+
+	# now ready to re-multiply peakpicked envelope and TFS
+endproc
+
+
+procedure rename_peakpicked_envelopes
+	# restore uniform naming scheme
+	# that was temporarily changed via the peak-picking procedure
+	for n from 1 to number_of_channels
+		select Sound channel_'n'_ENV_step_3_LPF
+		Remove
+		select Sound channel_'n'_ENV_peakpicked
+		Rename... channel_'n'_ENV_step_3_LPF
+	endfor
+endproc
+
+
+procedure make_carriers
+ 	# make the carriers that are filtered & modulated
+    #
+    # In the case that a single broadband carrier is used for all channels
+    # ( e.g. noise, harmonic complex), 
+    # create that carrier here
+    if carrier_type$ = "noise"
+        if carrier_filter_shape$ != "LNN"
+                # create one white noise now, to be narrowband filtered later
+                # in procedure `make_LNN_ERB`
+                do ("Create Sound from formula...", "carrier", num_stereo_channels, 0, end, samplerate, "randomGauss(0,0.1)")
+        endif
+                            
+    elsif carrier_type$ == "harmonic_complex"
+            # make tone complex here
+            # to be narrowband filtered later
+            # however, this process might be sped up by not creating the *full* broadband sound;
+            # only generate the harmonics that are needed for this channel
+            # since the sound-generating process is a slow point
+            if variableExists ("highest_needed_output_freq_component") == 0
+                highest_needed_output_freq_component = 0
+            endif
+            Create Sound as tone complex: "carrier", 0, end, samplerate, "Sine", harmonic_complex_F0, 0, highest_needed_output_freq_component, 0
+            
+    elsif carrier_type$ = "sinewave"
+            # ... wait until channel loop
+
+    elsif carrier_type$ = "LNN"
+            # ... wait until channel loop
+
+    elsif carrier_type$ == "original_sound"
+            # this will require a new per-channel process
+            # pause original-sound carrier not ready yet, as it requires per-channel filtering first
+    endif
+			
+	#=======================================================#
+	# CREATE CARRIER CHANNELS FOR EACH FREQUENCY BAND
+	for .channel_loop_index from 1 to number_of_channels
+	    #===============================================================#
+	    # SINEWAVE CARRIER specific for this channel
+		if carrier_type$ == "sinewave"
+			cf = carrier_freq_center_'.channel_loop_index'
+			call make_sinewave cf end samplerate carrier
+		endif
+		
+		#===============================================================#
+	    # ORIGINAL SOUND AS CARRIER
+		# (currently not available in this version of the script)
+		if carrier_type$ == "original_sound"
+			select Sound 'name$'
+			Copy... carrier
+		endif
+
+	    #===============================================================#
+	    # LOW-NOISE NOISE CARRIER specific for this channel
+		# and do the envelope multiplication inline
+		if carrier_filter_shape$ = "LNN"
+		   cf = carrier_freq_center_'.channel_loop_index'
+		   call make_LNN_ERB cf end samplerate carrier
+		endif
+		
+	    #===============================================================#
+	    # Multiply broadband carrier by the envelope
+            select Sound carrier
+            Copy... broad_carrier_channel_'.channel_loop_index'_w_ENV
+            Formula... self[col] * Sound_channel_'.channel_loop_index'_ENV_step_3_LPF[col]
+
+	    #===============================================================#
+	    # SPECTRALLY FILTER ENVELOPE-MODULATED CARRIER
+	    # to match the desired bandwidth or filter slope
+			call filter_carrier_channel .channel_loop_index
+			# yields "carrier_channel_'.channel_loop_index'"
+		 
+	    #===============================================================#
+		# CLEANUP
+		 if carrier_type$ == "sinewave"
+			select Sound carrier
+			Remove
+		 endif
+		 if carrier_type$ == "original_sound"
+		 	select Sound carrier
+		 	Remove
+		 endif
+ 		#===============================================================#
+	    # INTENSITY QUANTIZATION
+	    # Secret code to NOT do intensity quantization:
+	    # set number of intensity steps to be zero. 
+	    # If it's not zero, proceed with this procedure... 
+	    if num_intensity_steps > 0
+			select Sound carrier_channel_'.channel_loop_index'
+
+			# quantized envelope LPF
+			    int_quant_lpf = 100
+			    call quantize_intensity carrier_channel_'.channel_loop_index' num_intensity_steps min_input_range max_input_range int_quant_lpf
+			    select Sound carrier_channel_'.channel_loop_index'
+
+			# rename & update object name status
+			    Rename... temp_to_delete
+			    select Sound carrier_channel_'.channel_loop_index'_int_quant
+			    Rename... carrier_channel_'.channel_loop_index'
+
+			select Sound temp_to_delete
+			Remove
+	     endif
+    # end loop through channels
+	endfor
+endproc
+
+
+procedure makeContinuum .steps .low .high .prefix$ printvalues
+	for .thisStep from 1 to .steps
+		temp = (('.thisStep'-1)*('.high'-'.low')/('.steps'-1))+'.low'
+
+		'.prefix$''.thisStep' = temp
+		check = '.prefix$''.thisStep'
+			
+		if printvalues = 1
+			print '.prefix$''.thisStep''tab$''check:2' 'newline$'
+		endif
+	endfor
+endproc
+
+
+procedure circle_shift .sound$ .shift .newname$
+	select Sound '.sound$'
+	.end_time = Get total duration
+
+	part_1 = Extract part: .shift, .end_time, "rectangular", 1, "no"
+
+	select Sound '.sound$'
+	part_2 = Extract part: 0, .shift, "rectangular", 1, "no"
+
+	selectObject: part_1, part_2
+	Concatenate
+	Rename... '.newname$'
+
+	selectObject: part_1, part_2
+	Remove
+endproc
+
+
+procedure circle_shift_blend .sound$ .shift .blend_time .newname$
+	select Sound '.sound$'
+	.end_time = Get total duration
+
+	part_1 = Extract part for overlap: .shift, .end_time, .blend_time
+
+	select Sound '.sound$'
+	part_2 = Extract part for overlap: 0, .shift, .blend_time
+
+	selectObject: part_1, part_2
+	Concatenate with overlap... .blend_time
+	Rename... '.newname$'
+
+	selectObject: part_1, part_2
+	Remove
+endproc
+
+
+procedure get_envelope_TFS_chunks .name$
+	# This is a procedure that extracts the envelope of a sound
+	# in chunks of 32768 samples
+	# to work within memory limits
+	# Get duration to be used later
+	select Sound '.name$'
+	.duration = Get total duration
+	.samplerate = Get sampling frequency
+
+	# divide into 32768-sample chunks 
+	# to facilitate faster Hilbert transform
+	call divide_32768 '.name$'
+
+	# figure out how many chunks were created
+	num_chunks = divide_32768.chunks_analyzed
+	
+	# Hilbert transform for each successive chunk
+	for sound_part from 1 to num_chunks
+		call get_envelope_TFS '.name$'_part_'sound_part'
+	endfor
+	
+	# Sequence the TFSs back together into one sound
+		nocheck select junk
+		for sound_part from 1 to num_chunks
+		plus Sound '.name$'_part_'sound_part'_TFS
+		endfor
+		Override sampling frequency: .samplerate
+		Concatenate
+		Rename... junk
+		Extract part: 0, .duration, "rectangular", 1, "no"
+		Rename... '.name$'_TFS
+		select Sound junk
+		Remove
+	
+	# Sequence the ENVs back together into one sound
+		nocheck select junk
+		for sound_part from 1 to num_chunks
+		   	plus Sound '.name$'_part_'sound_part'_ENV
+		endfor
+		Override sampling frequency: .samplerate
+		Concatenate
+		Rename... junk
+		Extract part: 0, .duration, "rectangular", 1, "no"
+		Rename... '.name$'_ENV
+		select Sound junk
+	   	Remove
+	
+	# Cleanup
+	nocheck select junk
+	  for sound_part from 1 to num_chunks
+		plus Sound '.name$'_part_'sound_part'
+		plus Sound '.name$'_part_'sound_part'_TFS
+		plus Sound '.name$'_part_'sound_part'_ENV
+	  endfor
+	  Remove
+endproc
+
+procedure divide_32768 .name$
+    # Divide a sound into sequential chunks
+    # each with no more than 32678 (i.e. 2^15) samples
+    # that can then each be processed separately.
+    # Otherwise, processing will slow down immensely. 
+
+	select Sound '.name$'
+	.samplerate = Get sampling frequency
+	.duration = Get total duration
+	.num_samples = Get number of samples
+
+	.samples_collected = 0
+	.chunks_analyzed = 0
+	.sample_start = 0
+	while .samples_collected < .num_samples
+		.sample_end = .sample_start + 32768
+		.time_start = Get time from sample number: .sample_start
+		.time_end = Get time from sample number: .sample_end
+
+		selectObject: "Sound '.name$'"
+		Extract part: .time_start, .time_end, "rectangular", 1, "no"
+
+		.samples_collected = .samples_collected + 32768
+		.chunks_analyzed = .chunks_analyzed + 1
+		.sample_start = .sample_start + 32769
+
+		Rename... '.name$'_part_'.chunks_analyzed'
+	endwhile
+endproc
+
+procedure saveInfoWindow outputDirectory$ outputFileName$
+	# save all the contents of the info window
+	filedelete 'outputDirectory$'\'outputFileName$'.txt
+	fappendinfo 'outputDirectory$'\'outputFileName$'.txt
+endproc
+
+procedure calculate_LNN_ERB_edges cf  
+  # filter it into a single ERB  
+  erb_center = hertzToErb(cf)
+  erb_width = erb(cf)
+  
+  .freq_lower = cf - (erb_width/2) + 5
+  .freq_upper = cf + (erb_width/2) - 5
+endproc    
+
+procedure make_LNN_ERB cf .duration .samplerate .newname$
+	# Make low-noise noise# whose bandwidth is one ERB. 
+  	
+	num_iterations = num_LNN_iterations
+  
+  	# Make a broadband noise
+  	do ("Create Sound from formula...", "noise_to_filter", 1, 0, .duration, .samplerate, "randomGauss(0,0.1)")
+  
+  	# Filter it into a single ERB  
+  	erb_center = hertzToErb(cf)
+  	erb_width = erb(cf)  
+	.freq_lower = cf - (erb_width/2) + 5
+	.freq_upper = cf + (erb_width/2) - 5
+    # Note: lower edge increased by 5 Hz, upper edge decreased by 5 Hz
+    # to accommodate 10 Hz symmetrical bandwidth of Hann frequency filter
+
+	lnn_sidebandwidth = 10
+	target_intensity = 60
+
+	original_sound$ = "noise_to_filter"
+
+	# Initiate a starting sound
+		select Sound 'original_sound$'
+		Filter (pass Hann band): .freq_lower, .freq_upper, lnn_sidebandwidth
+		Rename... 'original_sound$'_LNN_0
+		Scale intensity... target_intensity
+
+	# Divide by envelope, repeat filtering  
+	for n from 1 to num_LNN_iterations
+		m = n - 1
+		# use the most recent output of this process
+		# (if it's run #1, use the original copy,
+		# which was renamed to end in "_0")
+
+		target_sound$ = "'original_sound$'_LNN_'m'"
+
+		# Get the envelope
+		if use_Hilbert == 1
+			call get_envelope_TFS_chunks 'target_sound$'
+			select Sound 'target_sound$'_TFS
+			Remove
+		else
+			# Faster envelope extraction
+			call fast_envelope 'target_sound$'
+		endif
+
+		select Sound 'target_sound$'
+		Copy... temp
+		
+		# Divide by its own envelope to flatten the envelope
+			Formula: "self[col] / Sound_'target_sound$'_ENV[col]"
+
+		# Filter out spectral splatter
+			Filter (pass Hann band): .freq_lower, .freq_upper, lnn_sidebandwidth
+
+		# Rename for the next iteration
+			Rename... 'original_sound$'_LNN_'n'
+
+		Scale intensity... target_intensity
+
+		# cleanup
+		select Sound temp
+		plus Sound 'target_sound$'_ENV
+		Remove
+
+    endfor 
+ 
+   # Cleanup the intermediate objects created along the way
+	select Sound noise_to_filter
+	Remove
+	for n from 1 to num_LNN_iterations
+	    index_to_remove = n - 1
+	    select Sound 'original_sound$'_LNN_'index_to_remove'
+	    Remove
+	endfor
+
+	# Rename new output sound
+	select Sound 'original_sound$'_LNN_'num_LNN_iterations'
+	Rename... '.newname$'
+endproc
+
+procedure make_sinewave .freq .duration .samplerate .newname$
+    # Wrapper formula for native praat function to look more transparent in the sequence
+	Create Sound from formula: "'.newname$'", 1, 0, .duration, .samplerate, "1/2 * sin(2*pi*.freq*x)"
+endproc
+
+procedure get_envelope_TFS .name$
+	# Low-pass envelope at 8000 Hz by default
+    .lpf = 8000
+  
+    select Sound '.name$'
+  
+    # 1: Time-domain to frequency-domain conversion (DFT)
+    spectrum = To Spectrum: "no"
+    Rename: "original"
+  
+    # 2: Hilbert transform
+    spectrumHilbert = Copy: "hilbert"
+    Formula: "if row=1 then Spectrum_original[2,col] else -Spectrum_original[1,col] fi"
+    soundHilbert = To Sound
+  
+    # 3: Obtain the ENV from the analytic signal
+    env = Copy: "'.name$'_ENV"
+    Formula: "sqrt(self^2 + Sound_'.name$'[]^2)"
+    
+    # low-pass filtered version
+    if .lpf > 0
+       Rename... temp
+       Filter (pass Hann band)... 0 .lpf 10
+       Rename... '.name$'_ENV
+       select Sound temp
+       Remove
+    endif
+  
+    
+    # 4: Obtain the TFS (method 1: cosine of the angle of the analytic signal)
+    selectObject: soundHilbert
+    tfs = Copy: "'.name$'_TFS"
+    Formula: "cos(arctan2(self, Sound_'.name$'[]))"
+    
+    
+    # 5: cleanup
+    removeObject: spectrum, spectrumHilbert, soundHilbert
+endproc
+
+procedure modify_ENV .name$ env_LPF .method$ .keep_periodicity .scramble_mix .suffix$ .draw
+    # constants
+    env_sidebandwidth = 10
+    cleanup_comparison = 1
+    .clean_mix = 1 - .scramble_mix
+
+    # Note: input .draw = 1 will draw the envelopes to the praat picture window
+
+    selectObject: "Sound '.name$'"
+
+    # Get some basic info
+		rms = Get root-mean-square: 0, 0
+		envelope_intensity = Get intensity (dB)
+		.samplerate = Get sampling frequency
+
+    # obtain the periodicity envelope 
+		# (everything above the LF envelope cutoff)
+		# highpass the modified envelope to get periodicity spectrum
+		Filter (pass Hann band): env_LPF, 600, env_sidebandwidth
+		Rename... '.name$'_periodicity_envelope
+
+	# lowpass to get the slow envelope
+		selectObject: "Sound '.name$'"
+		Filter (pass Hann band): 0, env_LPF, env_sidebandwidth
+		Rename: "'.name$'_envelope_LPF"
+
+   # modify the LF envelope
+	if .method$ == "scramble"
+		# print using SCRAMBLE method to modify envelope'newline$'
+			# randomize phase of the LPF envelope
+			call randomize_spectrum_phase '.name$'_envelope_LPF env_LPF
+			Rename... '.name$'_envelope_LPF_modified
+			
+			print ... phase proc done
+
+		elsif .method$ == "invert"
+			# print using INVERT method to modify envelope'newline$'
+			# invert envelope
+			call invert_sound '.name$'_envelope_LPF
+			print ... inverted envelope
+			select Sound '.name$'_envelope_LPF_inverted
+			Rename... '.name$'_envelope_LPF_modified
+			
+		else
+			pause method$ '.method$' not recognized! 
+	endif
+
+    # Make sure envelope is all positive numbers
+		call correct_to_zero '.name$'_envelope_LPF_modified
+
+   # Add the periodicity envelope
+		# i.e. add low band with complementary high band 
+		select Sound '.name$'_envelope_LPF_modified
+		Copy... '.name$'_envelope_LPF_modified_w_periodicity
+		
+	if .keep_periodicity == 1
+		Formula: "self[col] + Sound_'.name$'_periodicity_envelope[col]"
+	endif
+
+    # Fix intensity of the envelope
+		Scale intensity... envelope_intensity
+
+   # Add a constant so that it's all positive
+		Copy... '.name$'_envelope_LPF_modified_w_periodicity_corrected
+		call correct_to_zero '.name$'_envelope_LPF_modified_w_periodicity_corrected
+
+   # Resample and name the final output
+		Rename... to_resample
+		Resample... .samplerate 20
+		
+		Rename... '.name$''.suffix$'
+	
+   # Mix it with the original clean mix
+   	Formula... self[col]*.scramble_mix + Sound_'.name$'[col]*'.clean_mix'
+   		
+	select Sound to_resample
+	Remove
+
+   if .draw = 1
+	call draw_envelopes '.name$'_envelope_LPF '.name$'_envelope_LPF_modified
+   endif
+
+   # cleanup
+	select Sound '.name$'_periodicity_envelope
+	if cleanup_comparison = 1
+	   plus Sound '.name$'_envelope_LPF
+	   plus Sound '.name$'_envelope_LPF_modified
+	endif
+	plus Sound '.name$'_envelope_LPF_modified_w_periodicity
+	
+	if .method$=="scramble"
+	   plus Sound Phases
+	   plus Spectrum Ranphas
+	   plus Spectrum '.name$'_envelope_LPF
+	endif
+   Remove
+   select Sound '.name$''.suffix$'
+endproc
+
+
+procedure randomize_spectrum_phase .name$ .lpf
+	# If you want to randomize the phase of spectral information,
+	# But maintain the envelope modulation spectrum. 
+    # The following lines are from Paul Boersma's script at http://uk.groups.yahoo.com/group/praat-users/message/59 	
+	select Sound '.name$'
+	orig_duration = Get total duration
+	.samplerate = Get sampling frequency
+	
+	downsample_envelope = 1
+	if downsample_envelope = 1
+	# downsample
+	   Resample... env_LPF*4 50
+	   Rename... temp
+	
+	   select Sound '.name$'
+	   Remove
+	
+	   select Sound temp
+	   Rename... '.name$'
+	   print ... downsampled 
+	endif
+	To Spectrum... yes
+
+	select Spectrum '.name$'
+	nbin = Get number of bins
+	   # report number of bins
+	   # (it gets really small!)
+	   # pause number of bins is 'nbin'
+	
+	Create Sound... Phases 0 1 nbin randomUniform (0, 2 * pi)
+
+   # You then create a new Spectrum object with the same power
+       # as the original, but with a scrambled phase:
+
+	select Spectrum '.name$'
+	Copy... Ranphas
+	Formula... if row = 1
+	... then Spectrum_'.name$' [1, col] * cos (Sound_Phases [1, col])
+	... + Spectrum_'.name$' [2, col] * sin (Sound_Phases [1, col])
+	... else Spectrum_'.name$' [1, col] * sin (Sound_Phases [1, col])
+	... + Spectrum_'.name$' [2, col] * cos (Sound_Phases [1, col])
+	... fi
+	
+    # sonify the spectrum
+	To Sound
+	Rename... temp
+	
+	# upsample if you downsampled
+	   if downsample_envelope = 1
+	      Resample... .samplerate 50
+	      Rename... temp2
+	      
+	      select Sound temp
+	      Remove
+	      select Sound temp2
+	      Rename... temp
+	      print ... upsampled
+	   endif
+
+	Extract part: 0, orig_duration, "rectangular", 1, "no"
+	Rename... '.name$'_scrambled_phase
+
+	select Sound temp
+	Remove
+	select Sound '.name$'_scrambled_phase
+endproc
+
+
+procedure draw_envelopes .sound1$ .sound2$
+	Erase all
+    # figure out how high the y axis should go 
+	select Sound '.sound2$'
+	max_peak = Get maximum: 0, 0, "None"
+	select Sound '.sound1$'
+	orig_peak = Get maximum: 0, 0, "None"
+
+	if orig_peak > max_peak
+	   max_peak = orig_peak
+	endif
+
+	Line width: 1
+	Red
+	select Sound '.sound2$'
+	Draw: 0, 0, 0, max_peak, "no", "Curve"
+	# draw original envelope
+	Line width: 2
+	Black
+	select Sound '.sound1$'
+	Draw: 0, 0, 0, 0, "yes", "Curve"
+	Line width: 1
+endproc
+
+
+procedure correct_to_zero .sound$
+	# adjusts time series so that the minimum value is no less than zero
+   select Sound '.sound$'
+	min = Get minimum: 0, 0, "None"
+	if min < 0 
+	Formula: "self[col] - min"
+	endif
+endproc
+
+procedure invert_sound .sound$
+	# flips time series upside down 
+	# so that the highest value is the lowest value
+	select Sound '.sound$'
+	Copy... '.sound$'_inverted
+	.max_peak = Get maximum: 0, 0, "None"
+	Formula... .max_peak - self[col]
+endproc
+
+
+procedure divide_into_analysis_channels_rectangular .name$
+   # this divides the *original* sound into rectangular frequency channels
+   # 	
+   # extract each analysis channel using a sequence of FFT Hann band filters
+    for .channel_loop_index from 1 to number_of_channels
+		#print Creating channel '.channel_loop_index' analysis channel 'newline$'
+		low = analysis_freq_low_'.channel_loop_index'
+		high = analysis_freq_high_'.channel_loop_index'
+
+		select Sound '.name$'
+		Filter (pass Hann band)... low high filter_sideband_width
+		select Sound '.name$'_band
+		Rename... '.name$'_analysis_channel_'.channel_loop_index'
+    endfor
+endproc
+
+
+procedure divide_into_analysis_channels_sloped .name$
+    # this divides the *original* sound into frequency channels
+    # with a pass band, sloping away
+    # with specified dB rolloff per octave
+    # to facilitate channel interaction
+    # especially in the case of sinewave carriers
+	
+    # extract each analysis channel using a sequence of FFT filters
+    for .channel_loop_index from 1 to number_of_channels
+        select Sound '.name$'
+
+        # obtain the channel corner frequencies,
+        # set them to temporary variables that can be easily fed into a procedure
+        .filter_band_low  = analysis_freq_low_'.channel_loop_index'
+        .filter_band_high = analysis_freq_high_'.channel_loop_index'
+
+        call filter_band_oct_rolloff '.name$' .filter_band_low .filter_band_high analysis_filter_slope _filt
+        Rename... '.name$'_analysis_channel_'.channel_loop_index'
+    endfor
+endproc
+
+
+procedure filter_oct_rolloff .name$ .cf .rolloff_dB_per_oct .suffix$
+   # this procedure filters the carrier channel 
+   # to have a rolloff in terms of dB/octave
+   # and the top of the channel is peaked
+     select Sound '.name$'
+    Filter (formula)...  if x > 0 then self*10^(-(abs((log10(x/.cf)/log10(2)))*.rolloff_dB_per_oct)/20) else self fi
+    Rename... '.name$''.suffix$'
+endproc
+
+
+procedure filter_band_oct_rolloff .name$ .freq_low .freq_high .rolloff_dB_per_oct .suffix$
+	# this procedure filters the carrier channel 
+	# to have a rolloff in terms of dB/octave
+	# the top of the channel is flat,
+	# and it rolls off on the sidebands
+	
+	select Sound '.name$'
+	Filter (formula)...  if x > .freq_high then self*10^(-(abs((log10(x/.freq_high)/log10(2)))*.rolloff_dB_per_oct)/20) else self fi
+	Rename... temp
+	Filter (formula)...  if x > 0 and  x < .freq_low then self*10^(-(abs((log10(x/.freq_low)/log10(2)))*.rolloff_dB_per_oct)/20) else self fi
+	Rename... '.name$''.suffix$'
+
+	select Sound temp
+	Remove
+
+	select Sound '.name$''.suffix$'
+endproc
+
+
+procedure filter_mm_rolloff .name$ .cf .rolloff_per_mm .suffix$
+   # this procedure filters the carrier channel 
+   # to have a rolloff in terms of dB/mm in cochelar space 
+   # Greenwood cochlea parameters set elsewhere in the script
+     select Sound '.name$'
+     Filter (formula)...  if x > 0 
+		... then self*10^(-(abs((log10((x/aA)+k)*length/a)-(log10((.cf/aA)+k)*length/a))*.rolloff_per_mm)/20) else self fi
+     Rename... '.name$''.suffix$'
+endproc
+
+
+procedure filter_carrier_channel .channel_loop_index
+	 if carrier_filter_shape$ == "peaked"
+        # FILTER using formula centered around [carrier_freq_center_'channel_loop_index' ]
+        # this is where "current spread" is simulated 
+        cf = carrier_freq_center_'.channel_loop_index'
+        
+        if rolloff_type$ == "mm"
+            # Filter spectrum sloping dB per millimeter cochlear space
+            call filter_mm_rolloff broad_carrier_channel_'.channel_loop_index'_w_ENV cf rolloff_per_x _filt
+            Rename... carrier_channel_'.channel_loop_index'
+
+        elsif rolloff_type$ == "oct"
+            # Filter spectrum sloping dB per octave
+            call filter_oct_rolloff broad_carrier_channel_'.channel_loop_index'_w_ENV cf rolloff_per_x _filt
+            Rename... carrier_channel_'.channel_loop_index'
+        endif
+
+    elsif carrier_filter_shape$ == "rectangular"
+        # Band-pass filter using corner frequencies that define a flat-spectrum rectangular channel
+        select Sound broad_carrier_channel_'.channel_loop_index'_w_ENV
+        filt_low = carrier_freq_low_'.channel_loop_index'
+        filt_high = carrier_freq_high_'.channel_loop_index'
+
+        call bandpass broad_carrier_channel_'.channel_loop_index'_w_ENV filt_low filt_high filter_sideband_width carrier_channel_'.channel_loop_index'
+
+    elsif carrier_filter_shape$ == "LNN"
+        # Filter white noise into a single ERB 
+        # centered at the center frequency of the channel. 
+        freq_high = make_LNN_ERB.freq_upper
+        freq_low = make_LNN_ERB.freq_lower
+        call bandpass broad_carrier_channel_'.channel_loop_index'_w_ENV freq_low freq_high filter_sideband_width carrier_channel_'.channel_loop_index'
+        
+        select Sound carrier
+        Remove
+                    
+    elsif carrier_filter_shape$ == "sinewave"
+		select Sound broad_carrier_channel_'.channel_loop_index'_w_ENV
+		Copy... carrier_channel_'.channel_loop_index'
+
+    elsif analysis_channel_shape$ == "original"
+        # channel already created: '.name$'_analysis_channel_'.channel_loop_index'
+        # Select the filtered band from the input
+            select Sound 'name$'_analysis_channel_'.channel_loop_index'
+        
+        # Decompose into envelope and fine structure            
+            # faster than Hilbert transform:
+            call get_envelope_TFS_chunks 'name$'_analysis_channel_'.channel_loop_index'
+            #-------------------------------------#
+            # envelope is "'name$'_analysis_channel_'.channel_loop_index'_ENV"
+            # TFS is "'name$'_analysis_channel_'.channel_loop_index'_TFS"
+            #-------------------------------------#
+            # remove TFS (we don't need that)
+                select Sound 'name$'_analysis_channel_'.channel_loop_index'_ENV
+                Remove
+        
+        # Apply envelope to the TFS of 'name$'_analysis_channel_'.channel_loop_index'
+            select Sound 'name$'_analysis_channel_'.channel_loop_index'_TFS
+            Formula... self[col] * Sound_channel_'.channel_loop_index'_ENV_step_3_LPF[col]
+            Rename... 'name$'_analysis_channel_'.channel_loop_index'_TFS_w_ENV
+        
+        # Band-pass filter using corner frequencies that define a flat-spectrum rectangular channel
+            select Sound 'name$'_analysis_channel_'.channel_loop_index'_TFS_w_ENV
+            Rename... temp_to_re_filter
+            call bandpass temp_to_re_filter carrier_freq_low_'.channel_loop_index' carrier_freq_high_'.channel_loop_index' filter_sideband_width broad_carrier_channel_'.channel_loop_index'_w_ENV
+            
+            # Produce final carrier for this channel
+            Copy... carrier_channel_'.channel_loop_index'
+            
+            # cleanup
+            select Sound temp_to_re_filter
+            Remove
+	endif
+
+	select Sound carrier_channel_'.channel_loop_index'
+	Scale intensity... channel_'.channel_loop_index'_intensity
+endproc
+
+
+procedure evenOrOdd .which$ .number
+    # this is a vestigial function
+    # that was used as part of an interleaved-channel vocoder
+    # it just tells you if a number is even or odd. 
+
+   # .which$ is the choice of whether "odd" or "even" 
+   # is the class assigned to 'evenOrOdd.keep'
+	.even = '.number' mod 2
+	if '.even' <> 0
+		## number is odd
+		odd = 1
+		even = 0
+		if .which$ = "odd"
+			   .keep = 1
+			else
+			   .keep = 0
+		endif
+	else
+		odd = 0
+		even = 1
+		if .which$ = "even"
+			   .keep = 1
+			else
+			   .keep = 0
+		endif
+	endif
+	if .which$ = "all"
+		.keep = 1
+	endif
+endproc
+
+
+procedure set_channel_corner_frequencies corner_frequency_low corner_frequency_high number_of_channels
+	## Calculate upper & lower cochlear position boundaries
+	## using the inverse Greenwood function
+		corner_position_low = log10(('corner_frequency_low'/'aA')+'k')*'length'/'a'
+		corner_position_high = log10(('corner_frequency_high'/'aA')+'k')*'length'/'a'
+	
+    # Set LOW corner cochlear positions for each channel 
+    	## create the first low corner frequency
+    	# directly from the frequency on the input form 
+		loPos1 = corner_position_low
+
+	# establish the cochlear position of the LOW-freq boundary
+	# of the analysis channels
+		for channel_loop_index from 2 to (number_of_channels+1)
+		    prevChannel = channel_loop_index-1
+	        # Calculate space interval and add it to the previous landmark 
+		    loPos'channel_loop_index' = ((corner_position_high - corner_position_low)/(number_of_channels))+loPos'prevChannel'
+		endfor
+
+    # Set HIGH corner cochlear POSITIONS for each channel
+		for channel_loop_index from 1 to number_of_channels
+			nextChannel = channel_loop_index + 1
+			
+			hiPos'channel_loop_index' = loPos'nextChannel'
+	
+	# Set variable for cochlear positions 
+	# (ideal electrode positions) for each channel 
+		centerPos'channel_loop_index' = ((hiPos'channel_loop_index'-loPos'channel_loop_index')/2) + loPos'channel_loop_index'
+	endfor
+
+    # Set the variable for carrier frequencies
+    # by converting cochlear positions to frequency using Greenwood function
+	for channel_loop_index from 1 to number_of_channels
+
+		analysis_freq_low_'channel_loop_index' 	= 'aA'*((10^('a'*loPos'channel_loop_index'/'length'))-'k')
+		analysis_freq_center_'channel_loop_index' 	= 'aA'*((10^('a'*centerPos'channel_loop_index'/'length'))-'k')
+		analysis_freq_high_'channel_loop_index' 	= 'aA'*((10^('a'*hiPos'channel_loop_index'/'length'))-'k')
+
+		# set cochlear position (carrier) in the frequency domain, 
+		# including place shift
+		carrier_freq_center_'channel_loop_index' 	= 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift)/'length'))-'k')
+		carrier_freq_low_'channel_loop_index' 		= 'aA'*((10^('a'*(loPos'channel_loop_index'+shift)/'length'))-'k')
+		carrier_freq_high_'channel_loop_index' 	= 'aA'*((10^('a'*(hiPos'channel_loop_index'+shift)/'length'))-'k')
+	endfor
+
+	# calculate channel widths
+	# (especially to compare against filter widths)
+	if carrier_filter_shape$ == "rectangular"
+		# initialize this value
+		narrowest_channel_width = 99999999
+		widest_channel_width = 0
+
+		for channel_loop_index from 1 to number_of_channels
+				linear_width = analysis_freq_high_'channel_loop_index' - analysis_freq_low_'channel_loop_index'
+				channel_width_linear_'channel_loop_index' = linear_width
+				
+				# Update narrowest channel if necessary
+				if linear_width < narrowest_channel_width
+					narrowest_channel_width = linear_width
+				endif
+
+				# Update narrowest channel if necessary
+				if linear_width > widest_channel_width
+					widest_channel_width = linear_width
+				endif
+			endfor
+
+		# Give warning if channels are too narrow
+		if narrowest_channel_width < (filter_sideband_width*1.5)
+			beginPause: "Carrier filters are too narrow"
+				comment: "Narrowest channel bandwidth Calculated: 'narrowest_channel_width:1' Hz"
+				comment: "Filter sideband width: 'filter_sideband_width:1' Hz"
+				comment: ""
+				comment: "Your settings for carrier channels will produce stimulus artifacts"
+				comment: " at least one channel is dangerously narrow, meaning the channels will overlap,"
+				comment: " so you wouldn't get the actual number of channels you selected"
+				comment: ""
+				comment: "This can happen if you have too many channels within your frequency range"
+				comment: "(e.g. 64 channels between 500 and 4000 Hz)"
+				comment: ""
+				comment: "Narrow filter widths cannot support envelope fluctuations"
+				comment: ""
+				comment: "You can continue with these settings and risk these stimulus problems,"
+				comment: "Or exit change one of the settings"
+				comment: ""
+				comment: "If you make the filter sideband width smaller, you risk further channel-ringing artifacts"
+				comment: "But if you make the filter bandwidth wider, your channels will overlap."
+				comment: "i.e. filtering can't support the settings you requested in the startup menu."
+				comment: "You should NOT continue with these settings if you want quality stimuli"
+				comment: "that faithfully reflect the settings you entered in the startup menu."
+				comment: ""
+				comment: "Choose what to do:"
+				choice: "decision", 1
+					option: "Exit - go back and change settings"
+					option: "Continue anyway (not recommended)"
+					option: "change the filter sideband width"
+			clicked = endPause: "Continue", 1
+
+			if decision == 3
+				beginPause: "change filter side bandwidth"
+					comment: "See Praat manual page"
+					comment: "Spectrum: Filter (pass Hann band)..."
+					comment: "for more information on what this variable (smoothing) does."
+					real: "filter_sideband_width", filter_sideband_width
+				endPause: "Continue", 1
+			elsif decision == 1
+				exitScript ( )
+			else
+				# continue at user's own risk
+			endif
+		endif
+
+		# other warning: envelope fluctuation / bandwidth
+		if widest_channel_width < envelope_cutoff_filter*1.05
+			beginPause: "Envelope cutoff filter not supported"
+				comment: "Envelope cutoff filter (low-pass filter): 'envelope_cutoff_filter' Hz"
+				comment: "Widest channel bandwidth: 'widest_channel_width:1' Hz"
+				comment: "Note that this is for the single widest channel, not all channels."
+				comment: ""
+				comment: "The width of the channels will not support the envlope fluctuation rate"
+				comment: "that you intended to preserve."
+				comment: ""
+				comment: "This is a major problem if you prioritize envelope fluctuation frequency"
+				comment: "because you cannot say that you enabled modulations at 'envelope_cutoff_filter' Hz with these settings"
+				comment: ""
+				comment: "Choose what to do:"
+				choice: "decision", 1
+					option: "Exit - go back and change settings"
+					option: "Continue anyway (not recommended)"
+				comment: "if you simply continue, the envelope cutoff frequency will be lowered"
+				comment: "for each channel to match the channel's spectral bandwidth."
+			clicked = endPause: "Continue", 1
+			if decision == 1
+				exitScript ( )
+			else
+				# continue at user's own risk
+			endif
+		endif
+
+	endif
+   ## These global variables can now be called in other parts of the script
+endproc
+
+
+procedure bandpass .sound$ .lf .hf .width .newname$
+    # This is just a wrapper for the native Praat function
+    # written as a one-liner to include object renaming. 
+    select Sound '.sound$'
+    Filter (pass Hann band): .lf, .hf, .width
+    Rename... '.newname$'
+endproc
+
+
+procedure print_corner_frequencies
+	# print out all the channel-frequency info for the vocoder
+	#
+	if carrier_filter_shape$ == "rectangular" or carrier_filter_shape$ == "LNN"
+		# First, print header row
+		print Channel'tab$'Analysis_Low'tab$'Analysis_Center'tab$'Analysis_High'tab$'Cochlear_position'tab$'Shift'tab$'
+		print Carrier_Low'tab$'Carrier_Center'tab$'Carrier_High'tab$'Final_cochlear_position'newline$'
+
+		# Print subsequent lines 
+		for channel_loop_index from 1 to number_of_channels
+			# establish temporary variables for printing to the info window
+			freq_analysis_low    = analysis_freq_low_'channel_loop_index'
+			freq_analysis_center = analysis_freq_center_'channel_loop_index'
+			freq_analysis_high   = analysis_freq_high_'channel_loop_index'
+
+			centerPos = centerPos'channel_loop_index'
+
+			freq_carrier_low    = carrier_freq_low_'channel_loop_index'
+			freq_carrier_center = carrier_freq_center_'channel_loop_index'
+			freq_carrier_high   = carrier_freq_high_'channel_loop_index'
+
+			final_center_cochlear_position = centerPos + shift
+			print 'channel_loop_index''tab$''freq_analysis_low:0''tab$''freq_analysis_center:0''tab$''freq_analysis_high:0''tab$''centerPos:2''tab$''shift''tab$'
+			print 'freq_carrier_low:0''tab$''freq_carrier_center:0''tab$''freq_carrier_high:0''tab$''final_center_cochlear_position:2''newline$'
+		endfor
+
+	elsif carrier_filter_shape$ == "peaked"
+
+		if rolloff_type$ == "oct"
+			# first, print header row
+			print Channel'tab$'Analysis_Low'tab$'Analysis_Center'tab$'Analysis_High'tab$'Cochlear_position'tab$'Shift'tab$'
+			print lower_freq_10dB_down'tab$'lower_freq_6dB_down'tab$'Carrier_center_freq'tab$'upper_freq_6dB_down'tab$'upper_freq_10dB_down'tab$'Final_cochlear_position'newline$'
+
+			# frequency at 6dB and 10 dB away
+			for channel_loop_index from 1 to number_of_channels
+				freq_analysis_low    = analysis_freq_low_'channel_loop_index'
+				freq_analysis_center = analysis_freq_center_'channel_loop_index'
+				freq_analysis_high   = analysis_freq_high_'channel_loop_index'
+
+				carrier_lowfreq_at_6dB   = carrier_freq_center_'channel_loop_index' * (2^(-6/rolloff_per_x))
+				carrier_lowfreq_at_10dB  = carrier_freq_center_'channel_loop_index' * (2^(-10/rolloff_per_x))
+				freq_carrier_center      = carrier_freq_center_'channel_loop_index'
+				carrier_highfreq_at_6dB  = carrier_freq_center_'channel_loop_index' * (2^(6/rolloff_per_x))
+				carrier_highfreq_at_10dB = carrier_freq_center_'channel_loop_index' * (2^(10/rolloff_per_x))
+
+				centerPos = centerPos'channel_loop_index'
+				final_center_cochlear_position = centerPos + shift
+
+				print 'channel_loop_index''tab$''freq_analysis_low:0''tab$''freq_analysis_center:0''tab$''freq_analysis_high:0''tab$''centerPos:2''tab$''shift''tab$'
+				print 'carrier_lowfreq_at_10dB:0''tab$''carrier_lowfreq_at_6dB:0''tab$''freq_carrier_center:0''tab$'
+				print 'carrier_highfreq_at_6dB:0''tab$''carrier_highfreq_at_10dB:0''tab$''final_center_cochlear_position:2''newline$'
+			endfor
+
+	# in case of peaked carriers,
+	# frequency at 1mm and 2mm away in cochlear space
+		elsif rolloff_type$ == "mm"
+			# first, print header row
+			print Channel'tab$'Analysis_Low'tab$'Analysis_Center'tab$'Analysis_High'tab$'Cochlear_position'tab$'Shift'tab$'
+			print lower_freq_10dB_apical'tab$'lower_freq_6dB_apical'tab$'Carrier_center_freq'tab$'
+            print upper_freq_6dB_basal'tab$'upper_freq_10dB_basal'tab$'Final_cochlear_position'newline$'
+
+
+			for channel_loop_index from 1 to number_of_channels
+				freq_analysis_low    = analysis_freq_low_'channel_loop_index'
+				freq_analysis_center = analysis_freq_center_'channel_loop_index'
+				freq_analysis_high   = analysis_freq_high_'channel_loop_index'
+
+                carrier_lowfreq_at_10dB  = 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift-(10/rolloff_per_x))/'length'))-'k')
+                carrier_lowfreq_at_6dB   = 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift-(6/rolloff_per_x))/'length'))-'k')
+				freq_carrier_center      = 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift)/'length'))-'k')
+				carrier_highfreq_at_6dB  = 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift+(6/rolloff_per_x))/'length'))-'k')
+				carrier_highfreq_at_10dB = 'aA'*((10^('a'*(centerPos'channel_loop_index'+shift+(10/rolloff_per_x))/'length'))-'k')
+
+				centerPos = centerPos'channel_loop_index'
+				final_center_cochlear_position = centerPos + shift
+
+				print 'channel_loop_index''tab$''freq_analysis_low:0''tab$''freq_analysis_center:0''tab$''freq_analysis_high:0''tab$''centerPos:2''tab$''shift''tab$'
+				print 'carrier_lowfreq_at_10dB:0''tab$''carrier_lowfreq_at_6dB:0''tab$''freq_carrier_center:0''tab$'
+				print 'carrier_highfreq_at_6dB:0''tab$''carrier_highfreq_at_10dB:0''tab$''final_center_cochlear_position:2''newline$'
+			endfor
+		endif
+
+	elsif carrier_filter_shape$ == "sinewave"
+		# For sinewave carriers, dont print "lower" or "upper" carrier frequencies per channel
+		# because... it's just a sinewave.
+        #
+		# First, print header row
+		print Channel'tab$'Analysis_Low'tab$'Analysis_Center'tab$'Analysis_High'tab$'Cochlear_position'tab$'Shift'tab$'
+		print Carrier_freq'tab$'Final_cochlear_position'newline$'
+
+		# print subsequent lines 
+		for channel_loop_index from 1 to number_of_channels
+			# establish temporary variables for printing to the info window
+			freq_analysis_low    = analysis_freq_low_'channel_loop_index'
+			freq_analysis_center = analysis_freq_center_'channel_loop_index'
+			freq_analysis_high   = analysis_freq_high_'channel_loop_index'
+
+			centerPos = centerPos'channel_loop_index'
+
+			freq_carrier_center = carrier_freq_center_'channel_loop_index'
+
+			final_center_cochlear_position = centerPos + shift
+			print 'channel_loop_index''tab$''freq_analysis_low:0''tab$''freq_analysis_center:0''tab$''freq_analysis_high:0''tab$''centerPos:2''tab$''shift''tab$'
+			print 'freq_carrier_center:0''tab$''final_center_cochlear_position:2''newline$'
+		endfor
+	endif
+
+	if analysis_channel_shape$ == "sloped"
+		print 'newline$'NOTE: the numbers printed above for analysis channels represent contiguous rectangular bands,
+		print 'newline$'but analysis channels were sloped from a central frequency with 'rolloff_per_x' dB / octave'newline$'
+	endif
+endproc
+
+
+procedure cleanup_temp_objects
+    # Remove all the channels and envelopes that were created along the way
+
+	# First, ensure that nothing is selected
+    # by creating an object and then removing it
+	select Sound 'name$'
+	Copy... to_remove
+	Remove
+	
+	# faux-select to initiation group selection :)
+	nocheck select Sound gopher
+
+    # Loop through channels, selecting all of the objects
+	for chan_index from 1 to number_of_channels
+		plus Sound broad_carrier_channel_'chan_index'_w_ENV
+    	plus Sound channel_'chan_index'_ENV_step_3_LPF
+		if preserve_carrier_channels == 0
+			plus Sound carrier_channel_'chan_index'
+		endif
+
+		if preserve_analysis_channels == 0
+			plus Sound 'name$'_analysis_channel_'chan_index'
+		endif
+	endfor
+	Remove
+
+	# remove the carrier, if you were working from a unified broadband carrier
+	# (e.g. white noise, harmonic complex)
+	if carrier_type$ != "sinewave"
+	    if carrier_filter_shape$ != "LNN"
+	    #    if carrier_filter_shape$ != "original"
+		   		select Sound carrier
+				Remove
+		#	endif
+	    endif
+	endif
+endproc
+
+
+procedure finalize_vocode_process
+	# add it to the zeroed original signal,
+	# to ensure equal number of samples
+	# (beneficial for comparing direclty)
+		select Sound 'name$'
+		orig_intensity = Get intensity (dB)
+		Copy... 'name$''vocoded_suffix$'
+		# Replace original with vocoded signal here
+		Formula... Sound_temp_vocoded [col]
+	
+	# de-emphasize here, if you pre-emphasized
+		if pre_emphasize == 1
+			Filter (de-emphasis): preemphasis_starting_frequency
+			Rename... temp1
+			Filter (stop Hann band)... 0 70 40
+			Rename... temp
+			select Sound 'name$''vocoded_suffix$'
+			plus Sound temp1
+			Remove
+			select Sound temp
+			Rename... 'name$''vocoded_suffix$'
+		endif
+		
+	# if you downsampled, upsample and restore original sound
+	if optional_resample.resampled_to_optimize == 1
+		# Remove the COPY of the original sound that was downsampled
+		# be sure to select by index,
+		# because otherwise,
+		# it will select the vocoded sound and delete it,
+		# since its object name will be no different from the original object name. 
+		#select Sound 'name$'
+		select resampled_orig_sound_object_number
+		Remove
+
+		# This is the original sound; remove the "_orig" tag
+		#select Sound 
+        select original_sound_object_number
+		Rename... 'name$'
+
+		# Upsample the output to match the input
+		select Sound 'name$''vocoded_suffix$'
+		Rename... temp
+		Resample... original_samplerate 30
+		Rename... 'name$''vocoded_suffix$'
+
+		# Remove the undersampled output
+		select Sound temp
+		Remove
+
+	endif
+
+	# ramp the onset & offset by 3 ms
+		call ramp_onset_offset 'name$''vocoded_suffix$' 3
+
+	# scale to original intensity
+		Scale intensity... orig_intensity
+
+	# correct for clipping
+		peak = do ("Get absolute extremum...", 0, 0, "None")
+		if peak > 0.99
+			do ("Scale peak...", 0.99)
+		endif
+
+	# cleanup
+    select Sound temp_vocoded
+	Remove
+endproc
+
+
+procedure ramp_onset_offset .name$ .ramptime_ms
+	# convert seconds to milliseconds
+	.ramptime = .ramptime_ms/1000
+	
+	select Sound '.name$'
+	.start = Get start time
+	.end = Get end time
+
+	    Formula... if x < .start + .ramptime  
+	       ...then self * ((x - .start)/.ramptime) 
+	       ...else self endif  
+
+	     Formula... if x > (.end - '.ramptime')  
+		...then self * (1 - ((x - .end + .ramptime) / .ramptime))
+		...else self endif
+endproc
+
+
+procedure do_Hilbert_transform .name$
+  select Sound '.name$'
+
+	# 1: Time-domain to frequency-domain conversion (DFT)
+		spectrum = To Spectrum: "no"
+		Rename: "original"
+
+	# 2: Hilbert transform
+		spectrumHilbert = Copy: "hilbert"
+		Formula: "if row=1 then Spectrum_original[2,col] else -Spectrum_original[1,col] fi"
+		soundHilbert = To Sound
+
+	# 3: Obtain the ENV from the analytic signal
+		env = Copy: "'.name$'_ENV"
+		Formula: "sqrt(self^2 + Sound_'.name$'[]^2)"
+
+	
+	# 4: Obtain the TFS (method 1: cosine of the angle of the analytic signal)
+		selectObject: soundHilbert
+		tfs = Copy: "'.name$'_TFS"
+		Formula: "cos(arctan2(self, Sound_'.name$'[]))"
+	
+	# 5: cleanup
+		removeObject: spectrum, spectrumHilbert, soundHilbert
+
+endproc
+
+
+procedure optional_resample
+    # Initialize this variable to call on later
+	.resampled_to_optimize = 0
+
+	if resample_to_optimize_speed
+        .original_samplerate = samplerate
+
+        # Initiate starting value numbers
+			.highest_needed_analysis_freq_component = samplerate / 2
+			.highest_needed_output_freq_component = samplerate / 2
+
+        # Calculate highest analysis needed frequency
+        # based on analysis filters 
+        # and expected output channels
+        if carrier_filter_shape$ == "rectangular"
+            .highest_needed_analysis_freq_component = analysis_freq_high_'number_of_channels' + 300
+        endif
+
+		# If filtering with rolloff,
+		# go 1 octave higher than the highest center freq?
+		if carrier_filter_shape$ == "peaked"
+            .highest_needed_analysis_freq_component = analysis_freq_center_'number_of_channels' * 2^1
+        endif
+
+		if carrier_filter_shape$ == "LNN"
+			.x = analysis_freq_high_'number_of_channels'
+			.highest_needed_analysis_freq_component  = .x + (erb(.x)/1.4)
+		endif
+
+		# If using sinewave carriers,
+		# take the highest center freq, allow for the envelope modulations, and add 500 Hz buffer
+		if carrier_filter_shape$ == "sinewave"
+			.highest_needed_analysis_freq_component = analysis_freq_center_'number_of_channels' + envelope_cutoff_filter + 500
+        endif
+
+		# if using sloped analysis filters
+        if analysis_channel_shape$ == "sloped"
+			# go 1.5 octave beyond the highest center frequency component
+            .highest_needed_analysis_freq_component = analysis_freq_center_'number_of_channels' * 2^1.5
+        endif
+
+        # if you have a significant surplus of samples needed, then downsample *now*
+        # to cut down processing time at each processing stage.
+        # (e.g. needing only 8000 Hz output bandwidth
+        # for sound originally sampled at 44100, having 22050 Hz bandwidth)
+        # you only need 37% of the samples
+        freq_sample_ratio = .highest_needed_analysis_freq_component / (samplerate/2)
+        if freq_sample_ratio < 0.75
+            select Sound 'name$'
+            new_resample_rate = (.highest_needed_analysis_freq_component)*2.1
+			new_resample_rate = round(new_resample_rate)
+
+			Resample: new_resample_rate, 30
+            Rename... temp
+
+			# Overwrite samplerate to inherit into later procedures
+			# note: upon completion, the output is upsampled
+			# to 'original_samplerate'
+			samplerate = new_resample_rate
+
+            # Temporarily rename the original sound object
+            # (this is restored later)
+            select Sound 'name$'
+            Rename... 'name$'_orig
+            original_sound_object_number = selected("Sound")
+
+            # The new downsampled object acquires the original object name
+            select Sound temp
+            Rename... 'name$'
+			resampled_orig_sound_object_number = selected("Sound")
+
+			# this variable will initiate cleanup later, if this procedure is used
+			.resampled_to_optimize = 1
+        endif
+	else
+		# if you elected not to optimize via resampling, do nothing here
+    endif
+endproc
+
+
+procedure quantize_intensity .name$ .intensity_steps .min_input_range .max_input_range .quant_lpf
+
+	# these options were for debugging/development
+            # print info about the exact quantized intensity values
+            .print_info = 0
+
+            # Remove or leave the original and altered IntensityTiers 
+            # in the objects list
+            remove_int_contours = 1
+
+	# Create intensity table
+		select Sound '.name$'
+		.duration = Get total duration
+		To Intensity: 100, 0, "yes"
+		Down to IntensityTier
+		Copy... '.name$'_for_averaging
+		# omit -Inf values
+		Formula: "if self[col] < .min_input_range then .min_input_range else self[col] endif"
+		Formula: "if self[col] > .max_input_range then .max_input_range else self[col] endif"
+		Down to TableOfReal
+		To Table: "rowLabel"
+
+		# also make table for original values
+		select IntensityTier '.name$'
+		Down to TableOfReal
+		To Table: "rowLabel"
+
+		# make a copy that will be quantized
+		select IntensityTier '.name$'
+		Copy... '.name$'_quantized
+
+	# Get some intensity info
+		selectObject: "Table '.name$'_for_averaging"
+		int_mean = Get mean: "Intensity (dB)"
+		int_min = Get minimum: "Intensity (dB)"
+		int_max = Get maximum: "Intensity (dB)"
+		int_range = int_max - int_min
+
+    # stepsize in between discrete intensity steps
+		intensity_quant_stepsize = int_range / (.intensity_steps-1)
+
+	# initialize first step at 0 dB
+		intensity_quant_val[0] = 0
+
+	# Compute quantized intensity values
+	   # the first value is zero
+	   intensity_quant_val[1] = 0
+
+	   # the next n values are equally spaced between min and max from the sound itself
+	   for int_step_index from 2 to (.intensity_steps+1)
+            intensity_quant_val['int_step_index'] = int_min + (intensity_quant_stepsize * ('int_step_index'-2))
+            temp = intensity_quant_val['int_step_index']
+            if .print_info == 1
+                print intensity step 'int_step_index' is 'tab$''temp''newline$'	
+            endif
+	   endfor
+
+	# number of timepoints in the IntensityTier
+		select IntensityTier '.name$'
+		num_intensity_timepoints = Get number of points
+
+	# For each time step...
+	for int_time_index from 1 to num_intensity_timepoints
+		select Table '.name$'
+		orig_intensity_val = Get value: int_time_index, "Intensity (dB)"
+
+		# figure out which of the quantized values 
+		# is closest to the extracted original intensity
+		# this creates an array with values 0, (n steps between min and max intensity from IntensityTier)
+			for int_index from 1 to (.intensity_steps+1)
+				x_dev['int_index'] = intensity_quant_val['int_index'] - orig_intensity_val
+			endfor
+
+	   # create a table to store those values and their intensity step indices
+		   Create Table with column names: "table", (.intensity_steps+1), "index int orig dev"
+
+		   for n from 1 to (.intensity_steps+1)
+				Set numeric value: 'n', "index", 'n'
+				Set numeric value: 'n', "int", intensity_quant_val['n']
+				Set numeric value: 'n', "orig", orig_intensity_val
+
+				# deviation
+				Set numeric value: 'n', "dev", abs(x_dev['n'])
+
+			# end loop through quantized intensity values
+		   endfor
+
+	    # Get the intensity of the least deviation
+		# sort by deviation,
+		# with least deviation at top row
+			Sort rows: "dev"
+
+		quantized_int = Get value: 1, "int"
+		# remove that table
+		Remove
+
+		# Re-assign the intensity value for the IntensityTier
+		selectObject: "IntensityTier '.name$'_quantized"
+		time_indexed = Get time from index: int_time_index
+
+		Remove points between: time_indexed-0.0001, time_indexed+0.0001
+		Add point: time_indexed, quantized_int
+
+	# end loop through intensity time points
+	endfor
+
+	# cleanup
+		select Table '.name$'
+		plus TableOfReal '.name$'
+		plus Table '.name$'_for_averaging
+		plus TableOfReal '.name$'_for_averaging
+		plus Intensity '.name$'
+		Remove
+	
+	# Obtain the temporal fine structure
+	    # take the Hilbert TFS
+		select Sound '.name$'
+		call get_envelope_TFS_chunks '.name$'
+
+	# LPF the quantized envelope here
+	   # start from here: make a Matrix of the Intensity Tier
+		selectObject: "IntensityTier '.name$'_quantized"
+		To AmplitudeTier
+		Down to TableOfReal
+		To Matrix
+		Transpose
+
+	    # extract the third row - the sound pressure values
+		# (the first row is junk, the second row is time values)
+		To Sound (slice): 3
+
+	    # scale times to match original sound
+		select Sound '.name$'_quantized_transposed
+		Scale times to: 0, .duration
+		
+	    # resample the "sound" intensity envelope
+		Resample: samplerate, 50
+		Rename... '.name$'_quantized_transposed_res
+
+	    # LPF the envelope here,
+        # to prevent spectral splatter at quantized jumps
+		Filter (pass Hann band): 0, quantization_LPF, 50
+		# yields: Sound '.name$'_quantized_transposed_res_band
+
+	# Full multiplication
+		select Sound '.name$'_TFS
+		Copy... '.name$'_int_quant
+
+	# Multiply by the new quantized & LPF'ed envelope
+		Formula... self[col] * Sound_'.name$'_quantized_transposed_res_band[col]
+	
+	# cleanup
+		   select TableOfReal '.name$'_quantized
+		   plus Matrix '.name$'_quantized
+		   plus Matrix '.name$'_quantized_transposed
+		   plus AmplitudeTier '.name$'_quantized
+		   plus Sound '.name$'_quantized_transposed
+		   plus Sound '.name$'_quantized_transposed_res
+		   plus Sound '.name$'_quantized_transposed_res_band
+		   Remove
+
+	# scale to original intensity
+		selectObject: "Sound '.name$'"
+		orig_intensity = Get intensity (dB)
+		selectObject: "Sound '.name$'_int_quant"
+		Scale intensity: orig_intensity
+
+
+	# remove some more intermediate objects
+		selectObject: "Sound '.name$'_TFS"
+		if remove_int_contours == 1
+		plusObject: "IntensityTier '.name$'"
+		plusObject: "IntensityTier '.name$'_for_averaging"
+		plusObject: "IntensityTier '.name$'_quantized"
+		endif
+		plusObject: "Sound '.name$'_ENV"
+		Remove
+endproc
+
+
+procedure compress_envelope .sound$ comp_proportion .envelope_cutoff_freq
+    # to yield: '.sound$'_compressed
+	#=====================================#
+	# GET BASIC STARTING INFO
+		select Sound '.sound$'
+		Copy... '.sound$'_compressed
+		orig_intensity = Get intensity (dB)
+
+	#=====================================#
+	# ZERO-CORRECT OFF OF NEGATIVE BASELINE
+	# scale from 0 to 1
+		minimum = Get minimum: 0, 0, "None"
+		if minimum < 0 
+			Formula... self[col] - minimum
+		endif
+
+	# add small amount to avoid log-of-zero problem:
+			Formula... self[col] + 0.0001
+	#=====================================#
+	# CONVERT TO DB
+			Formula... 20 * (log10(self[col]))
+			#absolute_extremum = Get absolute extremum: 0, 0, "None"
+			maximum_orig_dB = Get maximum: 0, 0, "None"
+			#minimum_before_compression = Get minimum: 0, 0, "None"
+	#=====================================#
+	# set peak, take only the top x dB later
+			Formula... self[col] + (91 - (maximum_orig_dB))
+			Copy... env_90_ref
+		
+	#=====================================#
+	# COMPRESS the modulator (the voltage contour, not the carrier)
+	# add the (proportion of) the difference between the value and the ceiling
+		select Sound '.sound$'_compressed
+
+	#	Formula... self[col] + ((1-comp_proportion) * (maximum - self[col]) )
+		# don't affect anything below 35 dB below max of 90
+		Formula... if self[col] > (90-35) then self[col] + ((1-comp_proportion) * (90 - self[col]) ) else self[col] endif
+
+		# convert back to low dB (reverse the 90 dB correction)
+		Formula... self[col] - (90 - (maximum_orig_dB))
+
+	#=====================================#
+	#=====================================#
+	# CONVERT BACK TO VOLTAGE/PRESSURE
+		Formula... 10^(self[col]/20)
+	
+	# Correct the zero offset that we introduced before
+			Formula... self[col] - 0.001
+					
+	# Return low values back to zero
+    # by checking against original envelope
+		Formula... if Sound_'.sound$'[col] < orig_envelope_cutoff_mult then 0 else self[col] endif
+	
+	# re-low-pass filter it to remove any distortions to the envelope
+		Rename... temp_env
+		Filter (pass Hann band): 0, .envelope_cutoff_freq, 50
+		Rename... '.sound$'_compressed
+	
+		select Sound temp_env
+		plus Sound env_90_ref
+		Remove
+
+	# Restore original intensity
+		select Sound '.sound$'_compressed
+		Scale intensity... orig_intensity
+
+	# Remove original sound
+		select Sound '.sound$'
+		Remove
+endproc
+
+
+procedure print_vocoder_settings
+    # print settings that were used, for documentation
+    
+	appendInfoLine: ""
+	appendInfoLine: ""
+	appendInfoLine: "Channels and frequencies"
+	appendInfoLine: "Number of channels = 'number_of_channels'"
+	appendInfoLine: "Number stimulated = 'number_stimulated'"
+	appendInfoLine: "Frequency analysis filter style = 'filter_style$'"
+	appendInfoLine: "Basal shift = 'basal_shift'"
+
+	if number_stimulated != number_of_channels
+		appendInfoLine: "Window for peak-picking = 'window_refresh_rate' ms"
+	endif 
+	appendInfoLine: "Carrier type = 'carrier_type$'"
+	appendInfoLine: "Carrier filter shape = 'carrier_filter_shape$'"
+	appendInfoLine: "Carrier filter slope = 'rolloff_per_x_label$' dB / 'rolloff_type$'"
+	appendInfoLine: ""
+	appendInfoLine: ""
+	appendInfoLine: "Cochlea parameters for Greenwood function"
+	appendInfoLine: "A = 'aA'"
+	appendInfoLine: "a = 'a'"
+	appendInfoLine: "length = 'length'"
+	appendInfoLine: "k = 'k'"
+	appendInfoLine: ""
+	appendInfoLine: "Envelope properties"
+	appendInfoLine: "envelope sampling = 'envelope_cutoff_filter' Hz"
+	appendInfoLine: "compression multiplier = 'compression_mult_label$' %"
+	appendInfoLine: "Envelope multiplier cutoff floor = 'orig_envelope_cutoff_mult'"
+	if compression_mult != 1
+		appendInfoLine: "min_input_range = 'min_input_range' dB"
+		appendInfoLine: "max_input_range = 'max_input_range' dB"
+	endif
+		appendInfoLine: ""
+	if num_intensity_steps != 0
+		appendInfoLine: "Quantization"
+		appendInfoLine: "quantization low-pass filter = 'quantization_LPF'"
+		appendInfoLine: "Number of quantization steps = 'num_intensity_steps'"
+		appendInfoLine: ""
+	else
+		appendInfoLine: "No envelope quantization"
+	endif
+	if envelope = 0
+		appendInfoLine: "Envelope scrambling"
+		appendInfoLine: "scramble mix = 'scramble_mix'"
+	endif
+		appendInfoLine: ""
+
+	#if optional_resample.resampled_to_optimize == 1
+	#	print 'newline$'Resampled input to 'new_resample_rate:3' before processing to optimize speed
+	#	print 'newline$'Output upsampled to 'original_samplerate'
+	#endif
+endproc
+
+
+procedure assign_frequencies_cochlear
+   # match channel corner frequencies for the Cochlear Nucleus device
+   # as indicated on the clinical mapping software. 
+	number_of_channels = 22
+	number_stimulated = 8
+	
+	analysis_freq_low_1  = 188
+	analysis_freq_low_2  = 313
+	analysis_freq_low_3  = 438
+	analysis_freq_low_4  = 563
+	analysis_freq_low_5  = 688
+	analysis_freq_low_6  = 813
+	analysis_freq_low_7  = 938
+	analysis_freq_low_8  = 1063
+	analysis_freq_low_9  = 1188
+	analysis_freq_low_10 = 1313
+	analysis_freq_low_11 = 1563
+	analysis_freq_low_12 = 1813
+	analysis_freq_low_13 = 2063
+	analysis_freq_low_14 = 2313
+	analysis_freq_low_15 = 2688
+	analysis_freq_low_16 = 3063
+	analysis_freq_low_17 = 3563
+	analysis_freq_low_18 = 4063
+	analysis_freq_low_19 = 4688
+	analysis_freq_low_20 = 5313
+	analysis_freq_low_21 = 6063
+	analysis_freq_low_22 = 6938
+		
+	analysis_freq_center_1  = 250
+	analysis_freq_center_2  = 375
+	analysis_freq_center_3  = 500
+	analysis_freq_center_4  = 625
+	analysis_freq_center_5  = 750
+	analysis_freq_center_6  = 875
+	analysis_freq_center_7  = 1000
+	analysis_freq_center_8  = 1125
+	analysis_freq_center_9  = 1250
+	analysis_freq_center_10 = 1425
+	analysis_freq_center_11 = 1650
+	analysis_freq_center_12 = 1925
+	analysis_freq_center_13 = 2175
+	analysis_freq_center_14 = 2500
+	analysis_freq_center_15 = 2875
+	analysis_freq_center_16 = 3300
+	analysis_freq_center_17 = 3800
+	analysis_freq_center_18 = 4350
+	analysis_freq_center_19 = 5000
+	analysis_freq_center_20 = 5675
+	analysis_freq_center_21 = 6500
+	analysis_freq_center_22 = 7500
+	
+	analysis_freq_high_1  = 313
+	analysis_freq_high_2  = 438
+	analysis_freq_high_3  = 563
+	analysis_freq_high_4  = 688
+	analysis_freq_high_5  = 813
+	analysis_freq_high_6  = 938
+	analysis_freq_high_7  = 1063
+	analysis_freq_high_8  = 1188
+	analysis_freq_high_9  = 1313
+	analysis_freq_high_10 = 1563
+	analysis_freq_high_11 = 1813
+	analysis_freq_high_12 = 2063
+	analysis_freq_high_13 = 2313
+	analysis_freq_high_14 = 2688
+	analysis_freq_high_15 = 3063
+	analysis_freq_high_16 = 3563
+	analysis_freq_high_17 = 4063
+	analysis_freq_high_18 = 4688
+	analysis_freq_high_19 = 5313
+	analysis_freq_high_20 = 6063
+	analysis_freq_high_21 = 6938
+	analysis_freq_high_22 = 7938
+endproc
+
+
+procedure assign_frequencies_AB
+   # match channel corner frequencies for the AB device using the mid-scala or slim-J electrodes
+	number_of_channels = 16
+	number_stimulated = 16
+	
+	analysis_freq_low_1  = 250
+	analysis_freq_low_2  = 416
+	analysis_freq_low_3  = 494
+	analysis_freq_low_4  = 587
+	analysis_freq_low_5  = 697
+	analysis_freq_low_6  = 828
+	analysis_freq_low_7  = 983
+	analysis_freq_low_8  = 1168
+	analysis_freq_low_9  = 1387
+	analysis_freq_low_10 = 1648
+	analysis_freq_low_11 = 1958
+	analysis_freq_low_12 = 2326
+	analysis_freq_low_13 = 2763
+	analysis_freq_low_14 = 3281
+	analysis_freq_low_15 = 3898
+	analysis_freq_low_16 = 4630
+
+	analysis_freq_center_1  = 333
+	analysis_freq_center_2  = 455
+	analysis_freq_center_3  = 540
+	analysis_freq_center_4  = 642
+	analysis_freq_center_5  = 762
+	analysis_freq_center_6  = 905
+	analysis_freq_center_7  = 1075
+	analysis_freq_center_8  = 1277
+	analysis_freq_center_9  = 1517
+	analysis_freq_center_10 = 1803
+	analysis_freq_center_11 = 2142
+	analysis_freq_center_12 = 2544
+	analysis_freq_center_13 = 3022
+	analysis_freq_center_14 = 3589
+	analysis_freq_center_15 = 4264
+	analysis_freq_center_16 = 6665
+
+	analysis_freq_high_1  = 416
+	analysis_freq_high_2  = 494
+	analysis_freq_high_3  = 587
+	analysis_freq_high_4  = 697
+	analysis_freq_high_5  = 828
+	analysis_freq_high_6  = 983
+	analysis_freq_high_7  = 1168
+	analysis_freq_high_8  = 1387
+	analysis_freq_high_9  = 1648
+	analysis_freq_high_10 = 1958
+	analysis_freq_high_11 = 2326
+	analysis_freq_high_12 = 2763
+	analysis_freq_high_13 = 3281
+	analysis_freq_high_14 = 3898
+	analysis_freq_high_15 = 4630
+	analysis_freq_high_16 = 8700
+endproc
+
+
+procedure assign_frequencies_MedEl
+   # match channel corner frequencies for the Med-Eldevice
+   # NOTE: they use Filterbanks rather than FFT,
+   # So this is an inaccurate way to actually replicate their device. 
+   # This is ONLY an approximation of the frequency ranges 
+   # That roughly correspond to each channel. 
+	number_of_channels = 12
+	number_stimulated = 12
+	
+	analysis_freq_low_1  = 100
+	analysis_freq_low_2  = 175
+	analysis_freq_low_3  = 303
+	analysis_freq_low_4  = 476
+	analysis_freq_low_5  = 701
+	analysis_freq_low_6  = 998
+	analysis_freq_low_7  = 1390
+	analysis_freq_low_8  = 1907
+	analysis_freq_low_9  = 2614
+	analysis_freq_low_10 = 3531
+	analysis_freq_low_11 = 4798
+	analysis_freq_low_12 = 6451
+
+	analysis_freq_center_1  = 137
+	analysis_freq_center_2  = 239
+	analysis_freq_center_3  = 389
+	analysis_freq_center_4  = 588
+	analysis_freq_center_5  = 849
+	analysis_freq_center_6  = 1194
+	analysis_freq_center_7  = 1648
+	analysis_freq_center_8  = 2260
+	analysis_freq_center_9  = 3072
+	analysis_freq_center_10 = 4164
+	analysis_freq_center_11 = 5624
+	analysis_freq_center_12 = 7475
+
+	analysis_freq_high_1  = 175
+	analysis_freq_high_2  = 303
+	analysis_freq_high_3  = 476
+	analysis_freq_high_4  = 701
+	analysis_freq_high_5  = 998
+	analysis_freq_high_6  = 1390
+	analysis_freq_high_7  = 1907
+	analysis_freq_high_8  = 2614
+	analysis_freq_high_9  = 3531
+	analysis_freq_high_10 = 4798
+	analysis_freq_high_11 = 6451
+	analysis_freq_high_12 = 8500
+endproc
+
+
+procedure assign_frequencies_custom
+    # match channel corner frequencies as you type them
+    # In the future, this will be typed more efficiently
+    # using praat vectors# rather than declaring each channel separately. 
+    #
+   # For example the frequency-channel allocation of the Cochlear device, 
+   # but no peak-picking (keeping all 22 out of 22 channels)
+	number_of_channels = 22
+	number_stimulated = 22
+	
+	analysis_freq_low_1  = 188
+	analysis_freq_low_2  = 313
+	analysis_freq_low_3  = 438
+	analysis_freq_low_4  = 563
+	analysis_freq_low_5  = 688
+	analysis_freq_low_6  = 813
+	analysis_freq_low_7  = 938
+	analysis_freq_low_8  = 1063
+	analysis_freq_low_9  = 1188
+	analysis_freq_low_10 = 1313
+	analysis_freq_low_11 = 1563
+	analysis_freq_low_12 = 1813
+	analysis_freq_low_13 = 2063
+	analysis_freq_low_14 = 2313
+	analysis_freq_low_15 = 2688
+	analysis_freq_low_16 = 3063
+	analysis_freq_low_17 = 3563
+	analysis_freq_low_18 = 4063
+	analysis_freq_low_19 = 4688
+	analysis_freq_low_20 = 5313
+	analysis_freq_low_21 = 6063
+	analysis_freq_low_22 = 6938
+		
+	analysis_freq_center_1  = 250
+	analysis_freq_center_2  = 375
+	analysis_freq_center_3  = 500
+	analysis_freq_center_4  = 625
+	analysis_freq_center_5  = 750
+	analysis_freq_center_6  = 875
+	analysis_freq_center_7  = 1000
+	analysis_freq_center_8  = 1125
+	analysis_freq_center_9  = 1250
+	analysis_freq_center_10 = 1425
+	analysis_freq_center_11 = 1650
+	analysis_freq_center_12 = 1925
+	analysis_freq_center_13 = 2175
+	analysis_freq_center_14 = 2500
+	analysis_freq_center_15 = 2875
+	analysis_freq_center_16 = 3300
+	analysis_freq_center_17 = 3800
+	analysis_freq_center_18 = 4350
+	analysis_freq_center_19 = 5000
+	analysis_freq_center_20 = 5675
+	analysis_freq_center_21 = 6500
+	analysis_freq_center_22 = 7500
+	
+	analysis_freq_high_1  = 313
+	analysis_freq_high_2  = 438
+	analysis_freq_high_3  = 563
+	analysis_freq_high_4  = 688
+	analysis_freq_high_5  = 813
+	analysis_freq_high_6  = 938
+	analysis_freq_high_7  = 1063
+	analysis_freq_high_8  = 1188
+	analysis_freq_high_9  = 1313
+	analysis_freq_high_10 = 1563
+	analysis_freq_high_11 = 1813
+	analysis_freq_high_12 = 2063
+	analysis_freq_high_13 = 2313
+	analysis_freq_high_14 = 2688
+	analysis_freq_high_15 = 3063
+	analysis_freq_high_16 = 3563
+	analysis_freq_high_17 = 4063
+	analysis_freq_high_18 = 4688
+	analysis_freq_high_19 = 5313
+	analysis_freq_high_20 = 6063
+	analysis_freq_high_21 = 6938
+	analysis_freq_high_22 = 7938
+endproc
+
+
+procedure assign_frequencies_linear
+# match channel corner frequencies as you type them
+# In the future, this will be typed more efficiently
+# using praat vectors# rather than declaring each channel separately. 
+#
+   # For example the Cochlear device, but no peak-picking 
+   # (keeping all 22 out of 22 channels)
+	number_of_channels = 4
+	number_stimulated = 13
+	
+	analysis_freq_low_1  = 200
+	analysis_freq_low_2  = 600
+	analysis_freq_low_3  = 1000
+	analysis_freq_low_4  = 1400
+	analysis_freq_low_5  = 1800
+	analysis_freq_low_6  = 2200
+	analysis_freq_low_7  = 2600
+	analysis_freq_low_8  = 3000
+	analysis_freq_low_9  = 3400
+	analysis_freq_low_10 = 3800
+	analysis_freq_low_11 = 4200
+	analysis_freq_low_12 = 4600
+	analysis_freq_low_13 = 5000
+		
+	analysis_freq_center_1  = 400
+	analysis_freq_center_2  = 800
+	analysis_freq_center_3  = 1200
+	analysis_freq_center_4  = 1600
+	analysis_freq_center_5  = 2000
+	analysis_freq_center_6  = 2400
+	analysis_freq_center_7  = 2800
+	analysis_freq_center_8  = 3200
+	analysis_freq_center_9  = 3600
+	analysis_freq_center_10 = 4000
+	analysis_freq_center_11 = 4400
+	analysis_freq_center_12 = 4800
+	analysis_freq_center_13 = 5200
+	
+	analysis_freq_high_1  = 600
+	analysis_freq_high_2  = 1000
+	analysis_freq_high_3  = 1400
+	analysis_freq_high_4  = 1800
+	analysis_freq_high_5  = 2200
+	analysis_freq_high_6  = 2600
+	analysis_freq_high_7  = 3000
+	analysis_freq_high_8  = 3400
+	analysis_freq_high_9  = 3800
+	analysis_freq_high_10 = 4200
+	analysis_freq_high_11 = 4600
+	analysis_freq_high_12 = 5000
+	analysis_freq_high_13 = 5400
+endproc
+
+
+procedure user_select_components_to_preserve
+	if preserve_components_for_inspection == 1
+		beginPause: "Preserve some components for later inspection"
+			comment: "You can save some elements of the vocoding process"
+			comment: "that were created along the way."
+			comment: ""
+			comment: "(for example, if you want to inspect the envelopes, the filtering, the carriers, etc)"
+			comment: ""
+			comment: "NOTE 1: You only want to do this with ONE sound at a time"
+			comment: ""
+			
+			# Keep original channel frequency bands extracted from the input sound?
+			# (leave at 1 unless you're doing a demonstration with a single object
+			# to create individual extracted channels)
+			comment: "Channels of the original sound"
+			boolean: "preserve_analysis_channels", 0
+
+			# Remove individual vocoded channels
+			# (leave at 1 unless you're doing a demonstration with a single object
+			# to create individual extracted channels)
+			comment: "Channels of the output sound"
+			boolean: "preserve_carrier_channels", 0
+
+			# Keep envelopes in the objects list for later inspection?
+			# (only do this for one or two sounds)
+			comment: "Envelopes used to multiply the carrier"
+			comment: "(LPF envelopes are the ones used for the output)"
+			boolean: "preserve_original_envelopes", 0
+			boolean: "preserve_compressed_envelopes", 0
+			boolean: "preserve_LPF_envelopes", 0
+
+			# If you want to save the matrix of intensity values 
+			# over time for each channel
+			# (which were used to determine peak picking)
+			# this will pause for you when that is made, and let you save it. 
+			boolean: "intercept_to_save_channel_matrix", 0
+		endPause: "Continue",1
+
+		# Revert to zero if none selected
+		.user_total_selections = preserve_analysis_channels + preserve_carrier_channels + 
+			... preserve_original_envelopes + preserve_compressed_envelopes + preserve_LPF_envelopes + 
+			... intercept_to_save_channel_matrix
+			
+		if .user_total_selections < 1
+			preserve_components_for_inspection = 0
+		endif
+	else
+		preserve_analysis_channels       = 0
+		preserve_carrier_channels        = 0 
+		preserve_original_envelopes      = 0
+		preserve_compressed_envelopes    = 0
+		preserve_LPF_envelopes           = 0
+		intercept_to_save_channel_matrix = 0
+	endif
+	
+	# if components are preserved, disable the speed optimization
+	# (because the downsampling will make it very cumbersome 
+	# to do post-hoc analysis of the components)
+	if preserve_components_for_inspection == 1
+		resample_to_optimize_speed = 0
+	endif
+endproc
+
+
+procedure flag_component_overflow
+	# Warn user against preserving all the channel/envelope components from multiple sounds
+	# (because the object names will be the same for each processed sound)
+	if preserve_components_for_inspection == 1
+		if num_selected_sounds > 1
+			beginPause: "Preserving too many components"
+			comment: "If you want to preserve components in the vocoding process"
+			comment: "You can select no more than one sound to process"
+			comment: "(because the object names will be the same for each processed sound)"
+			endPause: "Okay - go back to startup menu",1
+        exitScript()
+		endif
+	endif
+endproc
+
+
+procedure save_component_parts
+    # offer user opportunity to save individual components
+    if preserve_components_for_inspection
+        beginPause: "Save files?"
+            comment: "You have preserved some components from the vocoding process"
+            comment: "Do you want to save them?"
+            choice: "save_option",1
+                option: "No, just keep them in the object list"
+                option: "Yes, let me choose the folder via pop-up window"
+                option: "Yes, I will type in the file path here:"
+            sentence: "path_name", "C:/my_path/here"
+        endPause: "confirm selection",1
+
+        if save_option == 2
+            path_name$ = chooseDirectory$: "Choose a directory"
+        endif
+
+        if save_option != 1
+            pause Choose the sounds that you want to save
+            number_of_selected_sounds = numberOfSelected ("Sound")
+
+            # Assign an object number to each sound
+            for this_selected_sound to number_of_selected_sounds
+                sound'this_selected_sound' = selected("Sound",this_selected_sound)
+            endfor
+
+            # Loop through the sounds
+            for thisSound from 1 to number_of_selected_sounds
+                select sound'thisSound'
+                name$ = selected$("Sound")
+
+                # Old style of Praat coding, but it still works
+                do ("Save as WAV file...", path_name$ + "/" + name$ + ".wav")
+
+            endfor
+
+            # Re-select the sounds
+            select sound1
+            for thisSound from 2 to number_of_selected_sounds
+                plus sound'thisSound'
+            endfor
+
+            pause DONE!
+        endif
+    endif
+endproc
+
+
+procedure set_startup_parameters
+   # Convert names from the opening popup form, etc. 
+   
+    #---------------------------------------------------------------#
+    #                                                               #
+    #                       Error checks                            #
+    #                                                               #
+    #---------------------------------------------------------------#
+    #
+    # quick n-of-m channel number compliance check
+        if number_stimulated > number_of_channels
+            exit Number of stimulated channels cannot be greater than the number of total analysis channels!
+        endif
+
+        if carrier_type$ == "harmonic_complex, rectangular" or carrier_type$ == "harmonic_complex, (controlled filter rolloff)"
+            if harmonic_complex_F0 > 300
+                exit pulse rate too high! please choose a rate at 300 Hz or below
+            endif
+        endif
+
+    # scrambling the envelope
+    # (1 is fill scramble of envelope modulation spectrum)
+    # (0 is fully clean intact envelope)
+    # You'd only use a non-zero number 
+    # for a very specific kind of envelope-distortion experiment
+    # I don't recommend changing this. 
+    # here, we just initiate the variable with default to NOT scramble. 
+    scramble_mix = 0
+    keep_periodicity = 1
+    env_LPF = 50
+
+        if envelope_cutoff_filter == 0
+			beginPause: "Envelope modulation scrambling"
+
+			comment: "Envelope modulation mix: (between 0 and 1)"
+			comment: "0 means preserve the original low-rate envelope"
+			comment: "1 means completely scramble where the low-rate envelope modulations are"
+			comment: "0.5 means mix them equally"
+            real: "scramble_mix", 0.5
+
+            comment: "Envelope modulation rate cutoff:"
+			comment: "50 means preserve (and scramble) modulations 50 Hz and slower"
+            comment: ""
+            comment: "16 Hz supports basic speech recognition"
+			comment: ""
+            comment: "higher numbers correspond to things"
+            comment: "that would not normally consider to be the envelope"
+			integer: "env_LPF", 50
+
+			comment: "Periodicity compression:"
+			comment: "1 means preserve periodicity"
+			comment: "even if you are scrambling the envelope"
+			comment: "0 means the periodicity modulations will also be scrambled"
+			boolean: "keep_periodicity", 1
+			endPause: "Continue", 1
+		else
+			num_intensity_steps = 0
+			compression_mult = 1
+		endif
+
+    # Error catches for envelope scramble
+        if scramble_mix < 0 
+                exit scramble_mix must be between 0 and 1 !
+        endif
+        if scramble_mix > 1
+                exit scramble_mix must be between 0 and 1 !
+        endif
+
+	# Conditional extra parameter windows if you are vocoding an entire folder of sounds
+		if process_entire_folder == 1
+			beginPause: "Vocode entire folder"
+				comment: "Choose how you will determine the folder of sounds to be processed:"
+				comment: "(the folder of sounds that already exist)"
+				choice: "choose_folder_by",2
+					option: "choose via pop-up window"
+					option: "type in directly below"
+				sentence: "orig_directory", "L:\PraatScripts\Vocoder\Orig_sounds_demo"
+				comment: ""
+				comment: "New sub-directory that will be created in your folder:"
+				sentence: "new_directory_name", "Voc_8_ch_shift_3"
+				comment: ""
+				comment: "Check this box to maintain exact filenames"
+				comment: "in the output subfolder"
+				comment: "(i.e. no special vocoder filename changes)"
+				boolean: "remove_suffix_in_output_files", 0
+			endPause: "Continue", 1
+
+			if choose_folder_by == 1
+				orig_directory$ = chooseDirectory$: "Choose a directory"
+			endif
+		endif
+
+		if envelope_compression_or_quantization
+			beginPause: "Envelope modifications"
+
+			comment: "Envelope quantization:"
+			comment: "0 means don't quantize (**you probably want this**)"
+			comment: "2 means output level can only take one of two values"
+			comment: "3 means output level can only take one of three values"
+			integer: "num_intensity_steps", 0
+
+			comment: "Envelope compression:"
+			comment: "1 means no compression"
+			comment: "0.5 means x dB modulation depth is now x/2 dB"
+			comment: "0 means no modulation at all (don't do that)"
+			real: "compression_mult", 1
+			endPause: "Continue", 1
+		else
+			num_intensity_steps = 0
+			compression_mult = 1
+		endif
+    #---------------------------------------------------------------#
+    # Declare analysis channel shape
+    #
+    if analysis_filter_slope == 0
+        # Interpret analysis filter from startup
+        # 0 is rectangular, otherwise the number is the analysis filter rolloff 
+        analysis_channel_shape$ = "rectangular"
+    else
+        analysis_channel_shape$ = "sloped"
+    endif
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #                  convert variable names                       #
+    #                                                               #
+    #---------------------------------------------------------------#
+
+    # Temporal envelope filter
+        envelope = envelope_cutoff_filter
+   
+    # Basal shift
+        shift = basal_shift
+   
+    # based on user preference for mm or octave rolloff
+        rolloff_per_x = peaked_carrier_rolloff
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #              set carrier spectral shape names                 #
+    #                                                               #
+    #---------------------------------------------------------------#
+	
+    # add leading zero to single-digit variable
+    # to preserve fixed-width naming
+    # and correct alphabetization
+        if rolloff_per_x < 10
+			rolloff_per_x_label$ = "0'rolloff_per_x'"
+        else 
+			rolloff_per_x_label$ = "'rolloff_per_x'"
+        endif
+
+        # convert user selection into a set of variable levels
+		if carrier_type$ == "noise, rectangular" 
+			carrier_type$ = "noise"
+			carrier_filter_shape$ = "rectangular"
+			shape_label$ = "rect"
+			rolloff_per_x_label$ = "N/A"
+			rolloff_type$ = "N/A"
+
+		elsif carrier_type$ == "noise, peaked (controlled filter rolloff/mm)"
+			carrier_type$ = "noise"
+			carrier_filter_shape$ = "peaked"
+			rolloff_type$ = "mm"
+			shape_label$ = "'rolloff_per_x_label$'_dBmm"
+
+		elsif carrier_type$ == "noise, peaked (controlled filter rolloff/oct)"
+			carrier_type$ = "noise"
+			carrier_filter_shape$ = "peaked"
+			rolloff_type$ = "oct"
+			shape_label$ = "'rolloff_per_x_label$'_dBoct"
+
+		elsif carrier_type$ == "harmonic_complex, rectangular"
+			carrier_type$ = "harmonic_complex"
+			carrier_filter_shape$ = "rectangular"
+			rolloff_per_x_label$ = "N/A"
+			rolloff_type$ = "N/A"
+			shape_label$ = "rect"
+
+		elsif carrier_type$ == "harmonic_complex, (controlled filter rolloff/mm)"
+			carrier_type$ = "harmonic_complex"
+			carrier_filter_shape$ = "peaked"
+			rolloff_type$ = "mm"
+			shape_label$ = "'rolloff_per_x_label$'_dBmm"
+
+		elsif carrier_type$ == "harmonic_complex, (controlled filter rolloff/oct)"
+			carrier_type$ = "harmonic_complex"
+			carrier_filter_shape$ = "peaked"
+			rolloff_type$ = "oct"
+			shape_label$ = "'rolloff_per_x_label$'_dBoct"
+
+		elsif carrier_type$ == "sinewave"
+			carrier_type$ = "sinewave"
+			carrier_filter_shape$ = "sinewave"
+			rolloff_per_x_label$ = "N/A"
+			rolloff_type$ = "N/A"
+			shape_label$ = ""
+
+		elsif carrier_type$ == "low-noise noise"
+			carrier_type$ = "LNN"
+			carrier_filter_shape$ = "LNN"
+            shape_label$ = "erb"
+			rolloff_per_x_label$ = "N/A"
+			rolloff_type$ = "N/A"
+
+		else
+			exit that carrier type not supported yet
+		endif
+
+		# Ihis option is not available in this version of the script.
+		# It would be to use the original sound to create channel carriers
+		if carrier_type$ = "original_sound"
+			# override shape
+			shape$ = "original"
+			print using original sound to create synthesis channels'newline$'
+		endif
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #                   hard-coded  variables                       #
+    #                                                               #
+    #---------------------------------------------------------------#
+
+    # filter sideband width (FFT based; shouldn't be too narrow)
+	    filter_sideband_width = 20
+
+    # Min and Max input range if you're quantizing the envelopes
+        min_input_range = 30
+        max_input_range = 80
+
+    # Cochlea parameters based on Greenwood (1990)
+        aA = 165.4
+        a = 2.1
+        length = 35
+        k = 0.88
+
+   # Coerce number of signal channels variable to be 1
+	num_stereo_channels = 1
+
+   # Hilbert envelope is more accurate but might slow you down a lot. 
+   use_Hilbert = 0
+   
+   num_LNN_iterations = 4
+   
+   # low-pass filtering the envelope after intensity quantization (to avoid spectral artifacts)
+   	quantization_LPF = 60
+
+   # when compressing, remove multiplier values below this number,
+	 # to avoid any droning sound caused by listing up silent parts. 
+		orig_envelope_cutoff_mult = 0.0001
+				# What this does is, when the intensity envelope is converted to a sound file 
+				# that spans from 0 to 1, there's some number below which any value 
+				# is just scaled down to zero so it doesn't just keep droning on 
+				# for the entire duration of the sound. 
+				# This is especially important for any recording that has any amount of 
+				# background noise in it. Any little bit of background noise will 
+				# activate the filter and cause a sinewave to be produced. 
+				# But if it's really supposed to be "quiet", you want to drop 
+				# those low-level inputs out of the picture. 
+				# This variable lets you set what level is the criterion for what 
+				# gets actually sent into the vocoder carrier filters. 
+				# If it's really high, then it'll drop a lot of low-level sounds out altogether, 
+				# which you don't want. If it's too low, then you'll get sinewave droning. 
+				# Somewhere between 0.0001 and 0.005 is probably a good range to use. 
+				# You'll notice that when you set it to the smaller value, 
+				# the vocoded sound output will sound very smooth. 
+				# and if you set it to be too high,
+				# the sound will come out really choppy, because a bunch of 
+				# places where sound was now are silent gaps. 
+
+    # remove envelope distortions near silence threshold
+        remove_near_silence = 1
+
+        # if that is set to be 1, 
+        # then any envelope values below this number will be set to zero
+        silence_threshold = 1e-4
+        silence_threshold = 0.0007
+
+    # pre-emphasis and de-emphasis to aid in peak-picking
+    # this accounts for the fact that speech energy rolls off 
+    # by roughly 6 dB/octave,
+    # resulting in disproportionate selection of low-frequency channels
+    # in peak-picking mode. 
+    # by preemphasizing, you're increasing spectral tilt by +6 dB/octave,
+    # meaning the whole speech range should be eligible for peak-picking. 
+        pre_emphasize = 1
+        preemphasis_starting_frequency = 1000
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #           set  channel-frequency  allocation                  #
+    #                                                               #
+    #---------------------------------------------------------------#
+     
+	if analysis_frequency_allocation$ == "Cochlea-spaced based on these frequencies"
+		# If you didn't select a pre-made custom map,
+		# create channel frequency allocation
+		# using channel numbers and frequency ranges
+		# typed in the startup window here.
+		filter_style$ = "Custom frequency allocation via Greenwood function"
+		call set_channel_corner_frequencies corner_frequency_low corner_frequency_high number_of_channels
+
+	elsif analysis_frequency_allocation$ == "use ``Cochlear`` map"
+		filter_style$ = "Cochlear Device frequency allocation"
+		call assign_frequencies_cochlear
+
+	elsif analysis_frequency_allocation$ == "use ``Med-El`` map" 
+		filter_style$ = "Med-El Device approximate frequency allocation"   	
+		call assign_frequencies_MedEl
+
+	elsif analysis_frequency_allocation$ == "use ``Advanced Bionics`` map" 
+		filter_style$ = "Advanced Bionics Device frequency allocation"
+		call assign_frequencies_AB
+
+	elsif analysis_frequency_allocation$ == "use customized map from the script"
+		filter_style$ = "Custom frequency allocation via direct assignment"
+		call assign_frequencies_custom
+
+	elsif analysis_frequency_allocation$ == "use custom linear channels"
+		filter_style$ = "Custom linear frequency allocation via direct assignment"
+		call assign_frequencies_linear
+		
+	endif
+
+	 # following frequency assignment,
+	 # set frequency allocation for each channel
+	 # (even if you are not using rectangular contiguous channels,
+    #   you'll still need to calculate center frequencies)
+	for channel_loop_index from 1 to number_of_channels
+	   # get cochlear position of center of analysis channel
+		frequency = analysis_freq_center_'channel_loop_index'
+		analysis_pos_center_'channel_loop_index' = log10((frequency/'aA')+'k')*'length'/'a'
+		
+		loPos'channel_loop_index' = log10((analysis_freq_low_'channel_loop_index'/'aA')+'k')*'length'/'a'
+		centerPos'channel_loop_index' = log10((analysis_freq_center_'channel_loop_index'/'aA')+'k')*'length'/'a'
+		hiPos'channel_loop_index' = log10((analysis_freq_high_'channel_loop_index'/'aA')+'k')*'length'/'a'
+
+	   # set electrode position (carrier) in the frequency domain, 
+	   # including place shift
+		carrier_freq_center_'channel_loop_index' = 'aA'*((10^('a'*(analysis_pos_center_'channel_loop_index'+'shift')/'length'))-'k')
+		carrier_freq_low_'channel_loop_index' 		= 'aA'*((10^('a'*(loPos'channel_loop_index'+shift)/'length'))-'k')
+		carrier_freq_high_'channel_loop_index' 	= 'aA'*((10^('a'*(hiPos'channel_loop_index'+shift)/'length'))-'k')
+	endfor
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #                   LNN  bandwidth  check                       #
+    #                                                               #
+    #---------------------------------------------------------------#
+
+	# evaluate if there's enough spectral bandwidth 
+	# to support the requested number of LNN ERBs
+	if carrier_filter_shape$ == "LNN"
+		.freq_lower = analysis_freq_low_1
+		.freq_upper = analysis_freq_high_'number_of_channels'
+
+		erb_lower = hertzToErb(.freq_lower)
+		erb_upper = hertzToErb(.freq_upper)
+		erb_span = floor(erb_upper - erb_lower)
+
+		if erb_span < number_of_channels
+			beginPause: "Too many channels"
+			comment: "LNN carriers must each occupy the width of exactly one auditory filter (ERB)"
+			comment: "with no overlap."
+			comment: "There are approximately ~~ 'erb_span' ~~ ERBs"
+			comment: "within the frequency range '.freq_lower:0' Hz to '.freq_upper:0' Hz"
+			comment: ""
+			comment: "but you have requested ~~ 'number_of_channels' ~~  channels,"
+			comment: "which violates the requirements of LNN."
+			comment: ""
+			comment: "You must choose a smaller number of channels,"
+			comment: "a greater frequency range,"
+			comment: "or a different type of carrier."
+			endPause: "Okay",1
+			exitScript()
+		endif
+	endif
+
+	# allow user to determine timing settings for peak picking
+        if number_stimulated < number_of_channels
+            beginPause: "Peak-picking settings"
+                comment: "Enter time (milliseconds) for peak-picking time analysis window"
+                real: "time_bins_for_peak_picking (ms)", 30
+            endPause: "Continue",1
+            window_refresh_rate = time_bins_for_peak_picking
+        endif
+
+    #---------------------------------------------------------------#
+    #                                                               #
+    #                     set sound name suffix                     #
+    #                                                               #
+    #---------------------------------------------------------------#
+
+	# output name suffic begins with number of channels
+   		vocoded_suffix$ = "_voc_'number_stimulated'_of_'number_of_channels'ch_'shape_label$'"
+   
+      
+	# Harmonic complex info in final object name
+		if carrier_type$ == "harmonic_complex"
+			vocoded_suffix$ = vocoded_suffix$ + "_HarmComp_'harmonic_complex_F0:0'"
+		endif
+
+	# LNN designation
+		if carrier_type$ == "LNN"
+			vocoded_suffix$ = vocoded_suffix$ + "_LNN"
+		endif
+
+	# Carrier filter slopes
+		if carrier_type$ == "harmonic_complex, (controlled filter rolloff)" or carrier_type$ == "noise, (controlled filter rolloff)"
+			vocoded_suffix$ = vocoded_suffix$ + "_fs_'shape_label$'"
+		endif
+
+	# Sinewave carrier info
+	if carrier_type$ == "sinewave"
+		vocoded_suffix$ = vocoded_suffix$ + "_sine"
+
+		# Analysis filter slopes if sinewave with slopes analysis filter bands
+		if analysis_filter_slope != 0
+			# update name suffix
+			vocoded_suffix$ = vocoded_suffix$ + "_af_'shape_label$'_'analysis_filter_slope'_oct"
+
+		endif
+	endif
+		
+	# Envelope cutoff filter
+		if envelope != 0
+	      	vocoded_suffix$ = vocoded_suffix$ + "_env_'envelope_cutoff_filter'"
+		else
+			vocoded_suffix$ = vocoded_suffix$ + "_env_scramble"
+		endif
+   
+	# Envelope compression label
+		if compression_mult != 1
+			# convert label to a rounded integer between 0 and 100
+			compression_mult_for_label = compression_mult*100
+			compression_mult_for_label = 'compression_mult_for_label:0'
+			compression_mult_label$ = "'compression_mult_for_label'"
+			vocoded_suffix$ = vocoded_suffix$ + "_comp_'compression_mult_label$'"
+		else
+			compression_mult_label$ = "100% (no compression)"
+		endif
+   
+	# add cochlear SHIFT to vocoded_suffix$
+		if shift > 0
+			shift_label_val = shift * 100
+			shift_label_val$ = "'shift_label_val:0'"
+			vocoded_suffix$ = vocoded_suffix$ + "_sh_'shift_label_val$'_mm"
+		endif
+   
+	# if user typed something into the output name suffix,
+	# then override the previous string construction
+	# and replace it with the user's input
+		if output_name_suffix$ != ""
+			vocoded_suffix$ = output_name_suffix$
+		endif
+	
+	# If user is running a whole folder,
+	# and chose to remove any added naming suffixes
+	# (e.g. if you're workign from a unified sitmulus list,
+	#   and only changing the folder where the files are drawn from,
+	#   as opposed to encoding the vocoder details in the filename itself)
+		if process_entire_folder == 1
+			if remove_suffix_in_output_files == 1
+				vocoded_suffix$ = ""
+			endif
+		endif
+
+	# NOTE:
+			# if you do not like those naming schemes described above, 
+            # you can create a new one here, and just un-comment the line
+			# vocoded_suffix$ = "your_vocoder_suffix_here"
+
+	resample_to_optimize_speed = 1
+
+	# This opens up a window where the user can select components that they wish to preserve
+    # during the process (e.g. analysis channels, envelopes, etc.)
+    # that can then be saved at the end. 
+    call user_select_components_to_preserve
+   
+endproc
